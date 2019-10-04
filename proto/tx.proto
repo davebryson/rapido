@@ -1,0 +1,13 @@
+syntax = "proto3";
+package app;
+
+// Transaction model used across client and app.
+// 'route' is used to identify the handler in the app
+// 'msgtype' is a num to identify the type of 'msg'
+message Tx {
+  string route = 1;
+  uint32 msgtype = 2;
+  bytes msg = 3;
+  bytes sender = 4;
+  bytes sig = 5;
+}
