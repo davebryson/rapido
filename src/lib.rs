@@ -24,6 +24,7 @@ use std::sync::Arc;
 use state_schema::{AppState, AppStateSchema};
 
 const NAME: &str = "rapido_v1";
+const REQ_QUERY_PATH_SEPERATOR: &str = "**";
 
 /// Function type for the abci checkTx handler.  This function should
 /// containt logic to determine whether to accept or reject transactions
@@ -44,6 +45,18 @@ pub trait Service {
     // implement state transistion logic and interact with storage.
     fn execute(&self, tx: &Tx, fork: &Fork) -> TxResult;
 
+    // Main entry point for abci request queries. 'snapshot' provides
+    // read-only access to storage.  You can use path to do your own routing
+    // for internal handlers.  NOTE: For now, I use a bit of a hack to map
+    // query requests to services.   Clients sending queries should use the
+    // form 'routename**your_application_path' in RequestQuery.data.
+    // Where 'routename' IS the service route name. The value '**' is used
+    // internally as a seperator, and 'your_application_path' is specific to your application.
+    // So, if request_query.data == 'routename**your_application_path', then:
+    //   routename == the service route name
+    //   your_application_path is the application specific path.
+    fn query(&self, path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult;
+
     // This function is called on ABCI commit to accumulate a new
     // root hash across all services. You should return the current
     // root hash from you state store(s).  If your app uses more than one form
@@ -51,20 +64,28 @@ pub trait Service {
     fn root_hash(&self, fork: &Fork) -> Hash;
 }
 
-/// TxResult must be returned from service/validateTxHandler. Any non-zero
-/// code indicates an error. Application can create their own meaningful codes.
+/// TODO: Convert this to a proper Result !
+/// TxResult is returned from service/validateTxHandler and automatically converted to the
+/// associated ResponseCheck-DeliverTx message. Any non-zero code indicates an error.
+/// Applications are responsible for creating their own meaningful codes and messages (log).
+///   
+/// Why not use a std::Result for this? In the future we need to add support for events to
+/// this structure.
 pub struct TxResult {
     pub code: u32,
     pub log: String,
 }
 
 impl TxResult {
-    /// Construct a new code and log/message
-    pub fn new(code: u32, log: String) -> Self {
-        Self { code, log }
+    // Construct a new code and log/message
+    pub fn new<T: Into<String>>(code: u32, log: T) -> Self {
+        Self {
+            code,
+            log: log.into(),
+        }
     }
 
-    /// Returns a 0 (ok) code with and empty log message
+    // Returns a 0 (ok) code with and empty log message
     pub fn ok() -> Self {
         Self {
             code: 0,
@@ -72,13 +93,36 @@ impl TxResult {
         }
     }
 
-    /// Returns and error with the reason
-    pub fn error(code: u32, reason: String) -> Self {
-        Self { code, log: reason }
+    // Returns and error with the reason
+    pub fn error<T: Into<String>>(code: u32, reason: T) -> Self {
+        Self {
+            code,
+            log: reason.into(),
+        }
     }
 }
 
-/// Convert a TxResult into a abci.checkTx response
+/// Type returned from service query handlers.  QueryResults will be
+/// converted to proper abci types internally.
+pub struct QueryResult {
+    pub code: u32,
+    pub value: Vec<u8>,
+}
+
+impl QueryResult {
+    pub fn ok(value: Vec<u8>) -> Self {
+        Self { code: 0, value }
+    }
+
+    pub fn error(code: u32) -> Self {
+        Self {
+            code,
+            value: Vec::new(),
+        }
+    }
+}
+
+// Convert a TxResult into a abci.checkTx response
 #[doc(hidden)]
 impl Into<ResponseCheckTx> for TxResult {
     fn into(self) -> ResponseCheckTx {
@@ -89,7 +133,7 @@ impl Into<ResponseCheckTx> for TxResult {
     }
 }
 
-/// Convert a TxResult into a abci.deliverTx response
+// Convert a TxResult into a abci.deliverTx response
 #[doc(hidden)]
 impl Into<ResponseDeliverTx> for TxResult {
     fn into(self) -> ResponseDeliverTx {
@@ -101,12 +145,12 @@ impl Into<ResponseDeliverTx> for TxResult {
 }
 
 pub trait IntoProtoBytes<P> {
-    /// Encode a Rust struct to Protobuf bytes.
+    // Encode a Rust struct to Protobuf bytes.
     fn into_proto_bytes(self) -> ProtobufResult<Vec<u8>>;
 }
 
 pub trait FromProtoBytes<P>: Sized {
-    /// Decode a Rust struct from encoded Protobuf bytes.
+    // Decode a Rust struct from encoded Protobuf bytes.
     fn from_proto_bytes(bytes: &[u8]) -> Result<Self, ProtobufError>;
 }
 
@@ -137,20 +181,20 @@ impl AppBuilder {
             validate_tx_handler: None,
         }
     }
-    /// Set the desired validation handler. If not set,
-    /// checkTx will return 'ok' by default
+    // Set the desired validation handler. If not set,
+    // checkTx will return 'ok' by default
     pub fn set_validation_handler(mut self, handler: ValidateTxHandler) -> Self {
         self.validate_tx_handler = Some(handler);
         self
     }
 
-    /// Add a Service to the application
+    // Add a Service to the application
     pub fn add_service(mut self, handler: Box<dyn Service>) -> Self {
         self.handlers.push(handler);
         self
     }
 
-    /// Call to return a configured node. This consumes the underlying builder
+    // Call to return a configured node. This consumes the underlying builder
     pub fn finish(self) -> Node {
         Node::new(self)
     }
@@ -167,7 +211,7 @@ pub struct Node {
 }
 
 impl Node {
-    /// Create the app. This is called automatically when using the builder
+    // Create the app. This is called automatically when using the builder
     pub fn new(config: AppBuilder) -> Self {
         let db = config.db;
 
@@ -199,6 +243,7 @@ impl Node {
         }
 
         if is_check {
+            // NOTE:  checkTx has read-only to store
             let snapshot = self.db.snapshot();
             return match self.validate_tx_handler {
                 Some(handler) => handler(&tx, &snapshot),
@@ -210,10 +255,20 @@ impl Node {
         let fork = self.db.fork();
         let service = self.services.get(&tx.route).unwrap();
         let result = service.execute(&tx, &fork);
-        self.commit_patches.push(fork.into_patch());
-
+        if result.code == 0 {
+            // We only save patches from successful txs
+            self.commit_patches.push(fork.into_patch());
+        }
         result
     }
+}
+
+// Parse request_query path into 2 parts: route, path.  Route should
+// point to the (route) name for the service.  Path is application specfic
+// and can be used to determine how to handle a specific request.
+fn parse_query_path(req_path: &String) -> (String, String) {
+    let paths: Vec<&str> = req_path.split(REQ_QUERY_PATH_SEPERATOR).collect();
+    (paths[0].into(), paths[1].into())
 }
 
 #[doc(hidden)]
@@ -236,8 +291,47 @@ impl abci::Application for Node {
         ResponseInitChain::new()
     }
 
+    fn query(&mut self, req: &RequestQuery) -> ResponseQuery {
+        // parse the path, splitting on '**'
+        let (route, query_path) = parse_query_path(&req.path);
+
+        // Check if a service exists for this route
+        if !self.services.contains_key(&route) {
+            let mut failresp = ResponseQuery::new();
+            failresp.code = 1u32;
+            failresp.log = format!("cannot find query service for {}", route);
+            return failresp;
+        }
+
+        // Decode the request key
+        let decoded_key = base64::decode(&req.data);
+        if decoded_key.is_err() {
+            let mut failresp = ResponseQuery::new();
+            failresp.code = 1u32;
+            failresp.log = format!(
+                "cannot decode key for service {}.  It should be base64 encoded",
+                route
+            );
+            return failresp;
+        }
+
+        // Call the service
+        let snapshot = self.db.snapshot();
+        let result =
+            self.services
+                .get(&route)
+                .unwrap()
+                .query(query_path, decoded_key.unwrap(), &snapshot);
+
+        // Return the result
+        let mut response = ResponseQuery::new();
+        response.code = result.code;
+        response.value = base64::encode(&result.value).to_bytes();
+        response.key = req.data.clone();
+        response
+    }
+
     fn check_tx(&mut self, req: &RequestCheckTx) -> ResponseCheckTx {
-        // Should only take snapshot
         self.run_tx(true, req.tx.clone()).into()
     }
 
@@ -254,8 +348,6 @@ impl abci::Application for Node {
     }
 
     fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
-        let mut resp = ResponseCommit::new();
-
         // Commit all patches to storage, clearing commit_patches
         for patch in self.commit_patches.drain(..) {
             self.db.merge(patch).unwrap();
@@ -279,9 +371,11 @@ impl abci::Application for Node {
             version: self.app_state.version,
             hash: self.app_state.hash.clone(),
         });
+
         // Merge new commit info to db
         self.db.merge(fork.into_patch()).unwrap();
 
+        let mut resp = ResponseCommit::new();
         resp.set_data(self.app_state.hash.clone());
         resp
     }

@@ -1,10 +1,10 @@
 use abci::*;
 use exonum_merkledb::TemporaryDB;
-use rapido::{AppBuilder, IntoProtoBytes, Node, Service, Tx, TxResult};
+use rapido::{AppBuilder, IntoProtoBytes, Node, Service, Tx, TxResult, QueryResult};
 use std::sync::Arc;
 
 use exonum_crypto::Hash;
-use exonum_merkledb::{Database, Fork, ObjectAccess, ObjectHash, ProofMapIndex, RefMut};
+use exonum_merkledb::{Database, Fork, Snapshot, ObjectAccess, ObjectHash, ProofMapIndex, RefMut};
 
 /// Example app cryptocurrency
 /// Schema
@@ -41,6 +41,10 @@ impl Service for SimpleHandler {
         TxResult::ok()
     }
 
+    fn query(&self, _path: String, _key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
+        QueryResult::ok(vec![])
+    }
+
     fn root_hash(&self, fork: &Fork) -> Hash {
         let schema = SchemaStore::new(fork);
         schema.state().object_hash()
@@ -73,9 +77,11 @@ fn test_app_basics() {
     let db = Arc::new(TemporaryDB::new());
     // used for testing
     let localaccess = db.clone();
+
     let mut app = AppBuilder::new(db)
         .add_service(Box::new(SimpleHandler {}))
         .finish();
+    // abci.run_local(app)
 
     send_and_check_code(&mut app, vec![0x1]);
     send_and_check_code(&mut app, vec![0x2]);
