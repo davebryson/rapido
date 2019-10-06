@@ -1,10 +1,10 @@
 use abci::*;
 use exonum_merkledb::TemporaryDB;
-use rapido::{AppBuilder, IntoProtoBytes, Node, Service, Tx, TxResult, QueryResult};
+use rapido::{AppBuilder, IntoProtoBytes, Node, QueryResult, Service, Tx, TxResult};
 use std::sync::Arc;
 
 use exonum_crypto::Hash;
-use exonum_merkledb::{Database, Fork, Snapshot, ObjectAccess, ObjectHash, ProofMapIndex, RefMut};
+use exonum_merkledb::{Database, Fork, ObjectAccess, ObjectHash, ProofMapIndex, RefMut, Snapshot};
 
 /// Example app cryptocurrency
 /// Schema
@@ -41,7 +41,7 @@ impl Service for SimpleHandler {
         TxResult::ok()
     }
 
-    fn query(&self, _path: String, _key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
+    fn query(&self, _path: String, _key: Vec<u8>, _snapshot: &Box<dyn Snapshot>) -> QueryResult {
         QueryResult::ok(vec![])
     }
 
