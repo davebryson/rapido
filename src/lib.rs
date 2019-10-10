@@ -1,170 +1,30 @@
 ///!
 ///! Rapido is a simple framework for creating Tendermint applications.
-///! It uses Protobuf3 for the message format and the exonum_merkle_db
+///! It uses Borsh (link) for the message format and the exonum_merkle_db
 ///! for state storage. To create an app you need to:
 ///!  - Define your storage schema.
 ///!  - Create your associated Services.
-///!  - Define a handler to validate incoming transactions
-///!  - Assemble the application with the builder
+///!  - Define a handler to validate incoming transactions...if you want
+///!  - Assemble the application with the AppBuilder
 ///!  - And finally, run it with abci.
 ///!
-pub use self::tx::Tx;
+pub use self::types::{
+    verify_tx_signature, AccountId, QueryResult, Service, Transaction, TxResult, ValidateTxHandler,
+};
 
-mod state_schema;
-mod tx;
+mod types;
 
 use abci::*;
+use borsh::BorshDeserialize;
 use exonum_crypto::Hash;
-use exonum_merkledb::{BinaryValue, Database, Fork, Patch, Snapshot};
-use protobuf::error::{ProtobufError, ProtobufResult};
-use protobuf::Message;
+use exonum_merkledb::{BinaryValue, Database, Patch};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use state_schema::{AppState, AppStateSchema};
+use types::schema::{AppState, AppStateSchema};
 
 const NAME: &str = "rapido_v1";
 const REQ_QUERY_PATH_SEPERATOR: &str = "**";
-
-/// Function type for the abci checkTx handler.  This function should
-/// containt logic to determine whether to accept or reject transactions
-/// from the Tendermint memory pool. Note: it only provides read-only
-/// access to storage.  So validation checks should be limited to validated
-/// Transaction messages and/or verifying sender signatures.
-pub type ValidateTxHandler = fn(tx: &Tx, snapshot: &Box<dyn Snapshot>) -> TxResult;
-
-/// Implement this trait for your application logic.
-/// Each application may have 1 or more of these. Each service is
-/// keyed by the application by the 'route'. So you use a unique route name.
-pub trait Service {
-    // The routing name of the service. This cooresponds to
-    // the route field in a Tx.
-    fn route(&self) -> String;
-
-    // Main entry point to your application. Here's where you
-    // implement state transistion logic and interact with storage.
-    fn execute(&self, tx: &Tx, fork: &Fork) -> TxResult;
-
-    // Main entry point for abci request queries. 'snapshot' provides
-    // read-only access to storage.  You can use path to do your own routing
-    // for internal handlers.  NOTE: For now, I use a bit of a hack to map
-    // query requests to services.   Clients sending queries should use the
-    // form 'routename**your_application_path' in RequestQuery.data.
-    // Where 'routename' IS the service route name. The value '**' is used
-    // internally as a seperator, and 'your_application_path' is specific to your application.
-    // So, if request_query.data == 'routename**your_application_path', then:
-    //   routename == the service route name
-    //   your_application_path is the application specific path.
-    fn query(&self, path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult;
-
-    // This function is called on ABCI commit to accumulate a new
-    // root hash across all services. You should return the current
-    // root hash from you state store(s).  If your app uses more than one form
-    // of storage, you should return an accumulates hash of all you storage root hashes.
-    fn root_hash(&self, fork: &Fork) -> Hash;
-}
-
-/// TODO: Convert this to a proper Result !
-/// TxResult is returned from service/validateTxHandler and automatically converted to the
-/// associated ResponseCheck-DeliverTx message. Any non-zero code indicates an error.
-/// Applications are responsible for creating their own meaningful codes and messages (log).
-///   
-/// Why not use a std::Result for this? In the future we need to add support for events to
-/// this structure.
-pub struct TxResult {
-    pub code: u32,
-    pub log: String,
-}
-
-impl TxResult {
-    // Construct a new code and log/message
-    pub fn new<T: Into<String>>(code: u32, log: T) -> Self {
-        Self {
-            code,
-            log: log.into(),
-        }
-    }
-
-    // Returns a 0 (ok) code with and empty log message
-    pub fn ok() -> Self {
-        Self {
-            code: 0,
-            log: "".to_string(),
-        }
-    }
-
-    // Returns and error with the reason
-    pub fn error<T: Into<String>>(code: u32, reason: T) -> Self {
-        Self {
-            code,
-            log: reason.into(),
-        }
-    }
-}
-
-/// Type returned from service query handlers.  QueryResults will be
-/// converted to proper abci types internally.
-pub struct QueryResult {
-    pub code: u32,
-    pub value: Vec<u8>,
-}
-
-impl QueryResult {
-    pub fn ok(value: Vec<u8>) -> Self {
-        Self { code: 0, value }
-    }
-
-    pub fn error(code: u32) -> Self {
-        Self {
-            code,
-            value: Vec::new(),
-        }
-    }
-}
-
-// Convert a TxResult into a abci.checkTx response
-#[doc(hidden)]
-impl Into<ResponseCheckTx> for TxResult {
-    fn into(self) -> ResponseCheckTx {
-        let mut resp = ResponseCheckTx::new();
-        resp.set_code(self.code);
-        resp.set_log(self.log);
-        resp
-    }
-}
-
-// Convert a TxResult into a abci.deliverTx response
-#[doc(hidden)]
-impl Into<ResponseDeliverTx> for TxResult {
-    fn into(self) -> ResponseDeliverTx {
-        let mut resp = ResponseDeliverTx::new();
-        resp.set_code(self.code);
-        resp.set_log(self.log);
-        resp
-    }
-}
-
-pub trait IntoProtoBytes<P> {
-    // Encode a Rust struct to Protobuf bytes.
-    fn into_proto_bytes(self) -> ProtobufResult<Vec<u8>>;
-}
-
-pub trait FromProtoBytes<P>: Sized {
-    // Decode a Rust struct from encoded Protobuf bytes.
-    fn from_proto_bytes(bytes: &[u8]) -> Result<Self, ProtobufError>;
-}
-
-impl IntoProtoBytes<Tx> for Tx {
-    fn into_proto_bytes(self) -> ProtobufResult<Vec<u8>> {
-        self.write_to_bytes()
-    }
-}
-
-impl FromProtoBytes<Tx> for Tx {
-    fn from_proto_bytes(bytes: &[u8]) -> Result<Self, ProtobufError> {
-        protobuf::parse_from_bytes::<Self>(bytes)
-    }
-}
 
 /// Builder to assemble an application
 pub struct AppBuilder {
@@ -174,6 +34,7 @@ pub struct AppBuilder {
 }
 
 impl AppBuilder {
+    // Create a new builder with a Database handle
     pub fn new(db: Arc<dyn Database>) -> Self {
         Self {
             db,
@@ -194,8 +55,12 @@ impl AppBuilder {
         self
     }
 
-    // Call to return a configured node. This consumes the underlying builder
+    // Call to return a configured node. This consumes the underlying builder.
+    // Will panic if no services are set.
     pub fn finish(self) -> Node {
+        if self.handlers.len() == 0 {
+            panic!("No services configured!");
+        }
         Node::new(self)
     }
 }
@@ -232,7 +97,7 @@ impl Node {
     }
 
     fn run_tx(&mut self, is_check: bool, raw_tx: Vec<u8>) -> TxResult {
-        let tx = match Tx::from_proto_bytes(&raw_tx[..]) {
+        let tx = match Transaction::try_from_slice(&raw_tx[..]) {
             Ok(tx) => tx,
             Err(e) => return TxResult::error(11, format!("Err parsing Tx: {:?}", &e)),
         };
@@ -268,6 +133,7 @@ impl Node {
 // and can be used to determine how to handle a specific request.
 fn parse_query_path(req_path: &String) -> (String, String) {
     let paths: Vec<&str> = req_path.split(REQ_QUERY_PATH_SEPERATOR).collect();
+    // TODO: Better checking/approach needed here...
     (paths[0].into(), paths[1].into())
 }
 
@@ -288,6 +154,7 @@ impl abci::Application for Node {
 
     fn init_chain(&mut self, _req: &RequestInitChain) -> ResponseInitChain {
         // Add commit patches
+        // Should add validators to storage
         ResponseInitChain::new()
     }
 
@@ -344,16 +211,18 @@ impl abci::Application for Node {
     }
 
     fn end_block(&mut self, _req: &RequestEndBlock) -> ResponseEndBlock {
+        // Should do validator updates
         ResponseEndBlock::new()
     }
 
     fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
-        // Commit all patches to storage, clearing commit_patches
+        // Commit to storage and clear commit_patches
         for patch in self.commit_patches.drain(..) {
             self.db.merge(patch).unwrap();
         }
 
         let fork = self.db.fork();
+
         // Calculate new root hash from all services
         let mut hashes: Vec<Hash> = Vec::new();
         for (_, service) in &self.services {

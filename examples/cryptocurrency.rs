@@ -1,67 +1,48 @@
-pub use self::cryptocurrency::{CreateAcctTx, DepositTx, TransferTx};
-
+use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::Hash;
 use exonum_merkledb::{
     impl_object_hash_for_binary_value, BinaryValue, Fork, ObjectAccess, ObjectHash, ProofMapIndex,
-    RefMut, Snapshot,
+    RefMut, Snapshot, TemporaryDB,
 };
-use protobuf::error::{ProtobufError, ProtobufResult};
-use protobuf::Message;
-use serde_derive::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::{borrow::Cow, convert::AsRef};
 
-use rapido::{FromProtoBytes, IntoProtoBytes, QueryResult, Service, Tx, TxResult};
-
-mod cryptocurrency;
+use rapido::{AccountId, AppBuilder, QueryResult, Service, Transaction, TxResult};
 
 pub const CRYPTO_SERVICE_ROUTE_NAME: &str = "cryptoapp";
 
-impl IntoProtoBytes<CreateAcctTx> for CreateAcctTx {
-    fn into_proto_bytes(self) -> ProtobufResult<Vec<u8>> {
-        self.write_to_bytes()
-    }
-}
-impl FromProtoBytes<CreateAcctTx> for CreateAcctTx {
-    fn from_proto_bytes(bytes: &[u8]) -> Result<Self, ProtobufError> {
-        protobuf::parse_from_bytes::<Self>(bytes)
-    }
+/** Messages  */
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
+pub struct CreateAcctTx {
+    pub account: AccountId,
 }
 
-impl IntoProtoBytes<DepositTx> for DepositTx {
-    fn into_proto_bytes(self) -> ProtobufResult<Vec<u8>> {
-        self.write_to_bytes()
-    }
-}
-impl FromProtoBytes<DepositTx> for DepositTx {
-    fn from_proto_bytes(bytes: &[u8]) -> Result<Self, ProtobufError> {
-        protobuf::parse_from_bytes::<Self>(bytes)
-    }
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
+pub struct DepositTx {
+    account: AccountId,
+    amount: u64,
 }
 
-impl IntoProtoBytes<TransferTx> for TransferTx {
-    fn into_proto_bytes(self) -> ProtobufResult<Vec<u8>> {
-        self.write_to_bytes()
-    }
-}
-impl FromProtoBytes<TransferTx> for TransferTx {
-    fn from_proto_bytes(bytes: &[u8]) -> Result<Self, ProtobufError> {
-        protobuf::parse_from_bytes::<Self>(bytes)
-    }
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
+pub struct TransferTx {
+    recipient: AccountId,
+    amount: u64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+// Storage
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
 pub struct Account {
-    pub name: String,
+    pub name: AccountId,
     pub balance: u64,
 }
 
 impl BinaryValue for Account {
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(self).unwrap()
+        self.try_to_vec().unwrap()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Result<Self, failure::Error> {
-        bincode::deserialize(bytes.as_ref()).map_err(From::from)
+        Account::try_from_slice(bytes.as_ref()).map_err(From::from)
     }
 }
 
@@ -73,7 +54,7 @@ impl<T: ObjectAccess> SchemaStore<T> {
         Self(object_access)
     }
 
-    pub fn state(&self) -> RefMut<ProofMapIndex<T, String, Account>> {
+    pub fn state(&self) -> RefMut<ProofMapIndex<T, AccountId, Account>> {
         self.0.get_object(CRYPTO_SERVICE_ROUTE_NAME)
     }
 }
@@ -84,11 +65,11 @@ impl Service for CryptocurrencyService {
         CRYPTO_SERVICE_ROUTE_NAME.into()
     }
 
-    fn execute(&self, tx: &Tx, fork: &Fork) -> TxResult {
+    fn execute(&self, tx: &Transaction, fork: &Fork) -> TxResult {
         match tx.msgtype {
             0 => on_account_create(&tx.msg, fork),
             1 => on_account_deposit(&tx.msg, fork),
-            2 => on_account_transfer(tx.sender.clone(), &tx.msg, fork),
+            2 => on_account_transfer(tx.signer.clone(), &tx.msg, fork),
             _ => TxResult::error(10, "unknown message"),
         }
     }
@@ -106,10 +87,8 @@ impl Service for CryptocurrencyService {
 // ** Handlers **
 
 fn on_account_query(key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
-    let account_name = String::from_utf8(key).unwrap();
     let schema = SchemaStore::new(snapshot);
-    if let Some(account) = schema.state().get(&account_name) {
-        // NOTE: This uses bincode
+    if let Some(account) = schema.state().get(&key) {
         let bits = account.into_bytes();
         return QueryResult::ok(bits);
     }
@@ -117,11 +96,11 @@ fn on_account_query(key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
 }
 
 fn on_account_create(raw_msg: &Vec<u8>, fork: &Fork) -> TxResult {
-    let m = CreateAcctTx::from_proto_bytes(&raw_msg[..]);
+    let m = CreateAcctTx::try_from_slice(&raw_msg[..]);
     if m.is_err() {
         return TxResult::error(13, "Error parsing message");
     }
-    let account_name = m.unwrap().name;
+    let account_name = m.unwrap().account;
 
     let mut store = SchemaStore::new(fork).state();
     if store.contains(&account_name) {
@@ -132,7 +111,7 @@ fn on_account_create(raw_msg: &Vec<u8>, fork: &Fork) -> TxResult {
         &account_name,
         Account {
             name: account_name.clone(),
-            balance: 0u64,
+            balance: 10u64,
         },
     );
 
@@ -141,7 +120,7 @@ fn on_account_create(raw_msg: &Vec<u8>, fork: &Fork) -> TxResult {
 
 // rules:  anyone can deposit to an existing account
 fn on_account_deposit(raw_msg: &Vec<u8>, fork: &Fork) -> TxResult {
-    let msg = DepositTx::from_proto_bytes(&raw_msg[..]);
+    let msg = DepositTx::try_from_slice(&raw_msg[..]);
     if msg.is_err() {
         return TxResult::error(14, "Error parsing message");
     }
@@ -161,21 +140,15 @@ fn on_account_deposit(raw_msg: &Vec<u8>, fork: &Fork) -> TxResult {
 }
 
 fn on_account_transfer(sender: Vec<u8>, raw_msg: &Vec<u8>, fork: &Fork) -> TxResult {
-    let m = TransferTx::from_proto_bytes(&raw_msg[..]);
+    let m = TransferTx::try_from_slice(&raw_msg[..]);
     if m.is_err() {
         return TxResult::error(15, "Error parsing message");
     }
 
-    let s = String::from_utf8(sender);
-    if s.is_err() {
-        return TxResult::error(21, "Error parsing sender");
-    }
-    let sender_name = s.unwrap();
-
     let transfer = m.unwrap();
     let mut store = SchemaStore::new(fork).state();
 
-    let mut sender_account = store.get(&sender_name).unwrap();
+    let mut sender_account = store.get(&sender).unwrap();
     if sender_account.balance < transfer.amount {
         return TxResult::error(25, "Insufficient funds!");
     }
@@ -185,8 +158,18 @@ fn on_account_transfer(sender: Vec<u8>, raw_msg: &Vec<u8>, fork: &Fork) -> TxRes
     sender_account.balance -= transfer.amount;
     recip_account.balance += transfer.amount;
 
-    store.put(&sender_name, sender_account);
+    store.put(&sender, sender_account);
     store.put(&transfer.recipient, recip_account);
 
     TxResult::ok()
+}
+
+
+// Main Application!
+fn main() {
+    let db = Arc::new(TemporaryDB::new());
+    let node = AppBuilder::new(db)
+        .add_service(Box::new(CryptocurrencyService {}))
+        .finish();
+    abci::run_local(node);
 }

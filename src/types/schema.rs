@@ -1,13 +1,13 @@
+use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::Hash;
 use exonum_merkledb::{
     impl_object_hash_for_binary_value, BinaryValue, Entry, ObjectAccess, ObjectHash, RefMut,
 };
-use serde_derive::{Deserialize, Serialize};
 use std::{borrow::Cow, convert::AsRef};
 
 const APP_STATE_STORE: &str = "app_state_store";
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
 pub struct AppState {
     pub version: i64,
     pub hash: Vec<u8>,
@@ -15,11 +15,11 @@ pub struct AppState {
 
 impl BinaryValue for AppState {
     fn to_bytes(&self) -> Vec<u8> {
-        bincode::serialize(self).unwrap()
+        self.try_to_vec().unwrap()
     }
 
     fn from_bytes(bytes: Cow<[u8]>) -> Result<Self, failure::Error> {
-        bincode::deserialize(bytes.as_ref()).map_err(From::from)
+        AppState::try_from_slice(bytes.as_ref()).map_err(From::from)
     }
 }
 
