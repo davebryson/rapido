@@ -175,10 +175,17 @@ impl abci::Application for Node {
         resp
     }
 
-    // TODO:
+    // Ran once on the initial start of the application
     fn init_chain(&mut self, _req: &RequestInitChain) -> ResponseInitChain {
-        // Add commit patches
-        // Should add validators to storage
+        for (_, service) in &self.services {
+            // a little clunky, but only done once
+            let fork = self.db.fork();
+            let result = service.genesis(&fork);
+            if result.code == 0 {
+                // We only save patches from successful transactions
+                self.commit_patches.push(fork.into_patch());
+            }
+        }
         ResponseInitChain::new()
     }
 

@@ -62,4 +62,3 @@ impl RpcClient {
         Ok(packet["result"].pretty(1))
     }
 }
-

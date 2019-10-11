@@ -2,7 +2,7 @@ use abci::*;
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{gen_keypair, Hash, SecretKey};
 use exonum_merkledb::{
-    Database, Fork, ObjectAccess, ObjectHash, ProofMapIndex, RefMut, Snapshot, TemporaryDB,
+    Fork, ObjectAccess, ObjectHash, ProofMapIndex, RefMut, Snapshot, TemporaryDB,
 };
 use std::sync::Arc;
 
@@ -69,6 +69,13 @@ struct CounterService;
 impl Service for CounterService {
     fn route(&self) -> String {
         ROUTE_NAME.into()
+    }
+
+    fn genesis(&self, fork: &Fork) -> TxResult {
+        let dave = [1u8; 32]; // Genesis account
+        let schema = SchemaStore::new(fork);
+        schema.add_account(&dave);
+        TxResult::ok()
     }
 
     fn decode_tx(
@@ -140,14 +147,8 @@ fn test_abci_works() {
         .finish();
 
     let (_pk, sk) = gen_keypair();
-    let dave = [1u8; 32]; // test account
-                          // Genesis
-    let f = db.fork();
-    let schema = SchemaStore::new(&f);
-    schema.add_account(&dave);
-    assert!(db.merge(f.into_patch()).is_ok());
+    let dave = [1u8; 32]; // test account add on genesis() in service
 
-    // Should pass
     assert_check_tx(&mut app, gen_and_sign_tx(dave, &sk, SetCountMsg(1)), 0u32);
     // Should fail (bad account)
     assert_check_tx(

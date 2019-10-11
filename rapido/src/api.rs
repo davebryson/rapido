@@ -24,8 +24,12 @@ pub trait Service: Sync + Send {
     // the route field in a Tx.
     fn route(&self) -> String;
 
-    // TODO:
-    // fn genesis(&self, validators, fork) -> TxResult;
+    // Called on first start-up of the application. Can be used to establish
+    // initial state in your application.
+    // TODO: Add validator info, and chain_id
+    fn genesis(&self, _fork: &Fork) -> TxResult {
+        TxResult::ok()
+    }
 
     // Decode incoming transactions for the applications.  Each service may contain
     // 1 or more transactions the perform a state transistion. This should contain the
