@@ -138,6 +138,7 @@ impl QueryResult {
 
 /// Main trait to implement for your application transactions.  Execute is ran
 /// during the abci 'deliver_tx' function.
+/// TODO: Change this to require Borsh as well??
 pub trait Transaction: Send + Sync {
     fn execute(&self, sender: AccountId, fork: &Fork) -> TxResult;
 }
@@ -154,6 +155,7 @@ pub struct SignedTransaction {
     pub signature: Vec<u8>,
 }
 
+// TODO: Should hide Borsh: encode() decode()
 impl SignedTransaction {
     // Create a new SignedTransaction
     pub fn new<R, M>(sender: AccountId, route: R, msgid: u16, msg: M) -> Self

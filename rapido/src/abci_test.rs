@@ -166,11 +166,11 @@ fn test_abci_works() {
     // Check state via a query.
     let mut query = RequestQuery::new();
     query.path = format!("{}**whatever", ROUTE_NAME);
-    query.data = base64::encode(&dave[..]).as_bytes().to_vec();
+    query.data = dave[..].to_vec(); //base64::encode(&dave[..]).as_bytes().to_vec();
     let qresp = app.query(&query);
     assert_eq!(0u32, qresp.code);
 
-    let v = base64::decode(&qresp.value[..]);
-    assert!(v.is_ok());
-    assert_eq!(vec![2], v.unwrap());
+    //let v = base64::decode(&qresp.value[..]);
+    //assert!(v.is_ok());
+    assert_eq!(vec![2], qresp.value);
 }

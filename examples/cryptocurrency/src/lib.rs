@@ -150,12 +150,17 @@ impl Service for CryptocurrencyService {
     }
 
     fn query(&self, _path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
+        //println!("INCOMING KEY: {:?}", base64::decode(&key.clone()[..]));
+        //let nkey = base64::decode(&key.clone()[..]).unwrap();
+        if key.len() != 32 {
+            return QueryResult::error(22);
+        }
         let schema = SchemaStore::new(snapshot);
         let mut acct = [0u8; 32];
         acct.copy_from_slice(&key[..]);
         if let Some(account) = schema.state().get(&acct) {
             let bits = account.into_bytes();
-            return QueryResult::ok(bits);
+            return QueryResult::ok(base64::encode(&bits[..]).to_bytes().to_vec());
         }
         QueryResult::error(1)
     }

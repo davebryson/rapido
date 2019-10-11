@@ -194,6 +194,9 @@ impl abci::Application for Node {
             return failresp;
         }
 
+        // Update 'key' should just be a vec
+        let key = req.data.clone();
+        /*
         // Decode the request key
         let decoded_key = base64::decode(&req.data);
         if decoded_key.is_err() {
@@ -205,19 +208,21 @@ impl abci::Application for Node {
             );
             return failresp;
         }
+        */
 
         // Call the service
         let snapshot = self.db.snapshot();
-        let result =
-            self.services
-                .get(&route)
-                .unwrap()
-                .query(query_path, decoded_key.unwrap(), &snapshot);
+        let result = self
+            .services
+            .get(&route)
+            .unwrap()
+            .query(query_path, key, &snapshot);
 
         // Return the result
         let mut response = ResponseQuery::new();
         response.code = result.code;
-        response.value = base64::encode(&result.value).to_bytes();
+        //response.value = base64::encode(&result.value).to_bytes();
+        response.value = result.value;
         response.key = req.data.clone();
         response
     }
