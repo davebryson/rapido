@@ -43,7 +43,7 @@ impl Transaction for CreateAcctTx {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
-pub struct DepositTx(u64); // msgid=1
+pub struct DepositTx(pub u64); // msgid=1
 impl DepositTx {
     pub fn into_boxed_tx(payload: &[u8]) -> Result<Box<dyn Transaction>, Error> {
         let msg = Self::try_from_slice(payload)?;
@@ -70,7 +70,7 @@ impl Transaction for DepositTx {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
-pub struct TransferTx(AccountId, u64); // msgid=2
+pub struct TransferTx(pub AccountId, pub u64); // msgid=2
 impl TransferTx {
     pub fn into_boxed_tx(payload: &[u8]) -> Result<Box<dyn Transaction>, Error> {
         let msg = Self::try_from_slice(payload)?;
@@ -160,7 +160,7 @@ impl Service for CryptocurrencyService {
         acct.copy_from_slice(&key[..]);
         if let Some(account) = schema.state().get(&acct) {
             let bits = account.into_bytes();
-            return QueryResult::ok(base64::encode(&bits[..]).to_bytes().to_vec());
+            return QueryResult::ok(bits);
         }
         QueryResult::error(1)
     }

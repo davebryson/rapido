@@ -1,13 +1,15 @@
-use json::{object, parse, JsonValue};
+use json::parse;
 use url::Url;
 
 mod requests;
 use requests::{AbciInfo, AbciQuery, AbciRequest, BroadcastTxCommit, NetInfo};
 
-/// Basic Tendermint RPC Client.   Works with pure Json via the rust-json
+/// Hacky Tendermint RPC Client.   Works with pure Json via the rust-json
 /// crate. Each method returns `Result<String, String>` where the value is
 /// either the json-rpc payload for 'result' or 'error'. You can then use
-/// the value to print or parse for indexed access into the json object.  
+/// the value to print or parse for indexed access into the json object.
+///
+/// *** This should not be used for anything other than testing, demos...***  
 pub struct RpcClient {
     url: Url,
 }
