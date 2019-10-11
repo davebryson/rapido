@@ -1,18 +1,13 @@
 ///!
-///! Rapido is a simple framework for creating Tendermint applications.
-///! It uses Borsh (link) for the message format and the exonum_merkle_db
-///! for state storage. To create an app you need to:
-///!  - Define your storage schema.
-///!  - Create your associated Services.
-///!  - Define a handler to validate incoming transactions...if you want
-///!  - Assemble the application with the AppBuilder
-///!  - And finally, run it with abci.
+///! Rapido is a Rust framework for building Tendermint applications via ABCI.
 ///!
-pub use self::types::{
-    verify_tx_signature, AccountId, QueryResult, Service, Transaction, TxResult, ValidateTxHandler,
+pub use self::api::{
+    sign_transaction, verify_tx_signature, AccountId, QueryResult, Service, SignedTransaction,
+    Transaction, TxResult, ValidateTxHandler,
 };
 
-mod types;
+mod api;
+mod appstate;
 
 use abci::*;
 use borsh::BorshDeserialize;
@@ -21,7 +16,7 @@ use exonum_merkledb::{BinaryValue, Database, Patch};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use types::schema::{AppState, AppStateSchema};
+use appstate::{AppState, AppStateSchema};
 
 const NAME: &str = "rapido_v1";
 const REQ_QUERY_PATH_SEPERATOR: &str = "**";
@@ -29,7 +24,7 @@ const REQ_QUERY_PATH_SEPERATOR: &str = "**";
 /// Builder to assemble an application
 pub struct AppBuilder {
     pub db: Arc<dyn Database>,
-    pub handlers: Vec<Box<dyn Service>>,
+    pub services: Vec<Box<dyn Service>>,
     pub validate_tx_handler: Option<ValidateTxHandler>,
 }
 
@@ -38,7 +33,7 @@ impl AppBuilder {
     pub fn new(db: Arc<dyn Database>) -> Self {
         Self {
             db,
-            handlers: Vec::new(),
+            services: Vec::new(),
             validate_tx_handler: None,
         }
     }
@@ -51,21 +46,26 @@ impl AppBuilder {
 
     // Add a Service to the application
     pub fn add_service(mut self, handler: Box<dyn Service>) -> Self {
-        self.handlers.push(handler);
+        self.services.push(handler);
         self
     }
 
     // Call to return a configured node. This consumes the underlying builder.
     // Will panic if no services are set.
     pub fn finish(self) -> Node {
-        if self.handlers.len() == 0 {
+        if self.services.len() == 0 {
             panic!("No services configured!");
         }
         Node::new(self)
     }
 }
 
-/// The application node.  Implements the abci application trait and provides
+// abci result codes used by the node
+pub const TXERR_CODE_SIGNED_TX: u32 = 100;
+pub const TXERR_CODE_SERVICE_NOT_FOUND: u32 = 101;
+pub const TXERR_CODE_DECODE_TX: u32 = 102;
+
+/// The application node implements the abci application trait and provides
 /// functionality to execute services and manage storage.
 pub struct Node {
     db: Arc<dyn Database>,
@@ -80,31 +80,42 @@ impl Node {
     pub fn new(config: AppBuilder) -> Self {
         let db = config.db;
 
-        let mut map: HashMap<String, Box<dyn Service>> = HashMap::new();
-        for h in config.handlers {
-            let route = h.route();
-            // Should check it doesn't already exist !
-            map.insert(route, h);
+        let mut service_map: HashMap<String, Box<dyn Service>> = HashMap::new();
+        for s in config.services {
+            let route = s.route();
+            // First come, first serve...
+            if !service_map.contains_key(&route) {
+                service_map.insert(route, s);
+            }
         }
 
         Self {
             db: db.clone(),
             app_state: AppState::default(),
-            services: map,
+            services: service_map,
             commit_patches: Vec::new(),
             validate_tx_handler: config.validate_tx_handler,
         }
     }
 
+    // internal function called by both check/deliver_tx
     fn run_tx(&mut self, is_check: bool, raw_tx: Vec<u8>) -> TxResult {
-        let tx = match Transaction::try_from_slice(&raw_tx[..]) {
+        let tx = match SignedTransaction::try_from_slice(&raw_tx[..]) {
             Ok(tx) => tx,
-            Err(e) => return TxResult::error(11, format!("Err parsing Tx: {:?}", &e)),
+            Err(e) => {
+                return TxResult::error(
+                    TXERR_CODE_SIGNED_TX,
+                    format!("Err parsing SignedTransaction: {:?}", &e),
+                )
+            }
         };
 
-        // Return err if there are no handlers matching the route
+        // Return err if there are no services matching the route
         if !self.services.contains_key(&tx.route) {
-            return TxResult::error(12, format!("Handler not found for route: {}", tx.route));
+            return TxResult::error(
+                TXERR_CODE_SERVICE_NOT_FOUND,
+                format!("Service not found for route: {}", tx.route),
+            );
         }
 
         if is_check {
@@ -119,15 +130,25 @@ impl Node {
         // Run DeliverTx
         let fork = self.db.fork();
         let service = self.services.get(&tx.route).unwrap();
-        let result = service.execute(&tx, &fork);
+        let result = match service.decode_tx(tx.msgid, tx.payload) {
+            Ok(handler) => handler.execute(tx.sender, &fork),
+            Err(e) => {
+                return TxResult::error(
+                    TXERR_CODE_DECODE_TX,
+                    format!("Err decoding transaction: {}", e),
+                )
+            }
+        };
+
         if result.code == 0 {
-            // We only save patches from successful txs
+            // We only save patches from successful transactions
             self.commit_patches.push(fork.into_patch());
         }
         result
     }
 }
 
+// TOTAL HACK RIGHT NOW!
 // Parse request_query path into 2 parts: route, path.  Route should
 // point to the (route) name for the service.  Path is application specfic
 // and can be used to determine how to handle a specific request.
@@ -137,8 +158,10 @@ fn parse_query_path(req_path: &String) -> (String, String) {
     (paths[0].into(), paths[1].into())
 }
 
+// Implements the abci::application trait
 #[doc(hidden)]
 impl abci::Application for Node {
+    // Check we're in sync, replay if not...
     fn info(&mut self, req: &RequestInfo) -> ResponseInfo {
         let snapshot = self.db.snapshot();
         let schema = AppStateSchema::new(&snapshot);
@@ -152,6 +175,7 @@ impl abci::Application for Node {
         resp
     }
 
+    // TODO:
     fn init_chain(&mut self, _req: &RequestInitChain) -> ResponseInitChain {
         // Add commit patches
         // Should add validators to storage
@@ -216,32 +240,30 @@ impl abci::Application for Node {
     }
 
     fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
-        // Commit to storage and clear commit_patches
+        // Commit accumulated patches to storage and clear commit_patches vec.
         for patch in self.commit_patches.drain(..) {
             self.db.merge(patch).unwrap();
         }
 
         let fork = self.db.fork();
 
-        // Calculate new root hash from all services
+        // Calculate new app hash from all services
         let mut hashes: Vec<Hash> = Vec::new();
         for (_, service) in &self.services {
             hashes.push(service.root_hash(&fork));
         }
         let state_root = exonum_merkledb::root_hash(&hashes);
 
-        // Update app state
+        // Update and commit the app state
+        let commit_schema = AppStateSchema::new(&fork);
         self.app_state.hash = state_root.to_bytes();
         self.app_state.version = self.app_state.version + 1;
-
-        // Commit app state
-        let commit_schema = AppStateSchema::new(&fork);
         commit_schema.app_state().set(AppState {
             version: self.app_state.version,
             hash: self.app_state.hash.clone(),
         });
 
-        // Merge new commit info to db
+        // Merge new commits into to db
         self.db.merge(fork.into_patch()).unwrap();
 
         let mut resp = ResponseCommit::new();
@@ -249,3 +271,12 @@ impl abci::Application for Node {
         resp
     }
 }
+
+#[cfg(test)]
+mod appstate_test;
+
+#[cfg(test)]
+mod api_test;
+
+#[cfg(test)]
+mod abci_test;
