@@ -1,5 +1,6 @@
 [workspace]
 members = [
-    "rapido"
+    "rapido",
+    "examples/cryptocurrency",
 ]
 
