@@ -63,14 +63,3 @@ impl RpcClient {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-        let client = RpcClient::new("http://uipnode1.mitre.org:26657");
-        println!("{}", client.net_info().unwrap())
-    }
-}
