@@ -88,15 +88,28 @@ impl Service for CounterService {
         Ok(Box::new(m))
     }
 
-    fn query(&self, _path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
-        let schema = SchemaStore::new(snapshot);
-        let mut acct = [0u8; 32];
-        if key.len() != 32 {
-            QueryResult::error(10);
+    fn query(&self, path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
+        if path == "/" {
+            let schema = SchemaStore::new(snapshot);
+            let mut acct = [0u8; 32];
+            if key.len() != 32 {
+                QueryResult::error(10);
+            }
+            acct.copy_from_slice(&key[..]);
+            let value = schema.get_current_count(&acct);
+
+            return QueryResult::ok(vec![value]);
         }
-        acct.copy_from_slice(&key[..]);
-        let value = schema.get_current_count(&acct);
-        QueryResult::ok(vec![value])
+
+        if path == "/one" {
+            return QueryResult::ok(vec![0x1]);
+        }
+
+        if path == "/two" {
+            return QueryResult::ok(vec![0x2]);
+        }
+
+        QueryResult::error(10)
     }
 
     fn root_hash(&self, fork: &Fork) -> Hash {
@@ -164,14 +177,49 @@ fn test_abci_works() {
     let root3 = assert_deliver_tx(&mut app, gen_and_sign_tx(dave, &sk, SetCountMsg(2)), 0u32);
     assert_ne!(root1, root3);
 
-    // Check state via a query.
-    let mut query = RequestQuery::new();
-    query.path = format!("{}**whatever", ROUTE_NAME);
-    query.data = dave[..].to_vec(); //base64::encode(&dave[..]).as_bytes().to_vec();
-    let qresp = app.query(&query);
-    assert_eq!(0u32, qresp.code);
+    // Check queries
+    {
+        let mut query = RequestQuery::new();
+        query.path = format!("{}/", ROUTE_NAME);
+        query.data = dave[..].to_vec();
+        let qresp = app.query(&query);
+        assert_eq!(0u32, qresp.code);
+        assert_eq!(vec![2], qresp.value);
+    }
 
-    //let v = base64::decode(&qresp.value[..]);
-    //assert!(v.is_ok());
-    assert_eq!(vec![2], qresp.value);
+    {
+        // Should fail
+        let mut query = RequestQuery::new();
+        query.path = "shouldfail".into();
+        query.data = dave[..].to_vec();
+        let qresp = app.query(&query);
+        assert_eq!(10u32, qresp.code);
+    }
+
+    {
+        // Should fail
+        let mut query = RequestQuery::new();
+        query.path = "/".into();
+        query.data = dave[..].to_vec();
+        let qresp = app.query(&query);
+        assert_eq!(10u32, qresp.code);
+    }
+
+    {
+        let mut query = RequestQuery::new();
+        query.path = format!("{}/one", ROUTE_NAME);
+        query.data = vec![];
+        let qresp = app.query(&query);
+        assert_eq!(0u32, qresp.code);
+        assert_eq!(vec![0x1], qresp.value);
+    }
+
+    {
+        let mut query = RequestQuery::new();
+        query.path = format!("{}/two", ROUTE_NAME);
+        query.data = vec![];
+        let qresp = app.query(&query);
+        assert_eq!(0u32, qresp.code);
+        assert_eq!(vec![0x2], qresp.value);
+    }
 }

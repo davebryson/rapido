@@ -9,6 +9,7 @@ use failure::ensure;
 pub const ACCOUNT_ID_LENGTH: usize = 32;
 
 /// A user-friendly type for [u8; 32] used to identify an account
+/// TODO: Just make this a Hash...
 pub type AccountId = [u8; ACCOUNT_ID_LENGTH];
 
 /// Function type for the abci checkTx handler.  This function should

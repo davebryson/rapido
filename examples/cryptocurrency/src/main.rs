@@ -74,7 +74,7 @@ fn create_account(sender: String) {
 fn query_account(sender: String) {
     let client = RpcClient::new(TMURL);
     let n = get_account(&sender).unwrap();
-    let result = client.abci_query("cryptoapp**ex", n[..].to_vec()).unwrap();
+    let result = client.abci_query("cryptoapp/", n[..].to_vec()).unwrap();
 
     // Parse into Json so we can access it
     let packet = json::parse(&result).unwrap();

@@ -19,7 +19,7 @@ use std::sync::Arc;
 use appstate::{AppState, AppStateSchema};
 
 const NAME: &str = "rapido_v1";
-const REQ_QUERY_PATH_SEPERATOR: &str = "**";
+const REQ_QUERY_PATH_SEPERATOR: &str = "/";
 
 /// Builder to assemble an application
 pub struct AppBuilder {
@@ -148,14 +148,15 @@ impl Node {
     }
 }
 
-// TOTAL HACK RIGHT NOW!
-// Parse request_query path into 2 parts: route, path.  Route should
-// point to the (route) name for the service.  Path is application specfic
-// and can be used to determine how to handle a specific request.
-fn parse_query_path(req_path: &String) -> (String, String) {
-    let paths: Vec<&str> = req_path.split(REQ_QUERY_PATH_SEPERATOR).collect();
-    // TODO: Better checking/approach needed here...
-    (paths[0].into(), paths[1].into())
+/// Parse a query route:  It expects query routes to be in the
+/// form: 'route/somepath', where 'route' is the name of the service,
+/// and '/somepath' is your application's specific path. If you
+/// want to just query on any key, use the form: 'route/'.
+fn parse_abci_query_path(req_path: &String) -> Option<(&str, &str)> {
+    req_path
+        .find(REQ_QUERY_PATH_SEPERATOR)
+        .filter(|i| i > &0usize)
+        .and_then(|index| Some(req_path.split_at(index)))
 }
 
 // Implements the abci::application trait
@@ -190,45 +191,37 @@ impl abci::Application for Node {
     }
 
     fn query(&mut self, req: &RequestQuery) -> ResponseQuery {
-        // parse the path, splitting on '**'
-        let (route, query_path) = parse_query_path(&req.path);
+        let mut response = ResponseQuery::new();
+        let key = req.data.clone();
+
+        let (route, query_path) = match parse_abci_query_path(&req.path) {
+            Some(tuple) => tuple,
+            None => {
+                response.code = 10;
+                response.key = req.data.clone();
+                response.log = "No query path found.  Format should be 'route/apppath'".into();
+                return response;
+            }
+        };
 
         // Check if a service exists for this route
-        if !self.services.contains_key(&route) {
-            let mut failresp = ResponseQuery::new();
-            failresp.code = 1u32;
-            failresp.log = format!("cannot find query service for {}", route);
-            return failresp;
+        let route_as_string: &String = &route.into();
+        if !self.services.contains_key(route_as_string) {
+            response.code = 10;
+            response.log = format!("cannot find query service for {}", route);
+            return response;
         }
-
-        // Update 'key' should just be a vec
-        let key = req.data.clone();
-        /*
-        // Decode the request key
-        let decoded_key = base64::decode(&req.data);
-        if decoded_key.is_err() {
-            let mut failresp = ResponseQuery::new();
-            failresp.code = 1u32;
-            failresp.log = format!(
-                "cannot decode key for service {}.  It should be base64 encoded",
-                route
-            );
-            return failresp;
-        }
-        */
 
         // Call the service
         let snapshot = self.db.snapshot();
-        let result = self
-            .services
-            .get(&route)
-            .unwrap()
-            .query(query_path, key, &snapshot);
+        let result =
+            self.services
+                .get(route_as_string)
+                .unwrap()
+                .query(query_path.into(), key, &snapshot);
 
         // Return the result
-        let mut response = ResponseQuery::new();
         response.code = result.code;
-        //response.value = base64::encode(&result.value).to_bytes();
         response.value = result.value;
         response.key = req.data.clone();
         response
