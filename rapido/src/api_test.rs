@@ -38,7 +38,7 @@ impl Service for MyService {
 
     fn decode_tx(
         &self,
-        msgid: u16,
+        msgid: u8,
         payload: Vec<u8>,
     ) -> Result<Box<dyn Transaction>, std::io::Error> {
         match msgid {
@@ -78,18 +78,18 @@ fn test_basic_service_flow() {
     let fork = db.fork();
     let service = MyService {};
 
-    let tx1 = service.decode_tx(0u16, enc_msg1).unwrap();
+    let tx1 = service.decode_tx(0, enc_msg1).unwrap();
     let result1 = tx1.execute([1u8; 32], &fork);
     assert_eq!(0u32, result1.code);
 
     {
-        let tx2 = service.decode_tx(1u16, enc_msg2.clone()).unwrap();
+        let tx2 = service.decode_tx(1, enc_msg2.clone()).unwrap();
         let result2 = tx2.execute([2u8; 32], &fork);
         assert_eq!(0u32, result2.code);
     }
 
     {
-        let tx2 = service.decode_tx(0u16, enc_msg2.clone()).unwrap();
+        let tx2 = service.decode_tx(0, enc_msg2.clone()).unwrap();
         // Wrong msg id ============ ^
         let result2 = tx2.execute([2u8; 32], &fork);
         assert_eq!(1u32, result2.code);
@@ -101,13 +101,13 @@ fn test_with_signed_tx() {
     let (pk, sk) = gen_keypair();
     let msg = HelloMsgOne(1u8);
 
-    let mut signed = SignedTransaction::new([1u8; 32], "hello", 0u16, msg);
+    let mut signed = SignedTransaction::new([1u8; 32], "hello", 0, msg);
     assert!(sign_transaction(&mut signed, &sk).is_ok());
     assert!(verify_tx_signature(&signed, &pk));
 
     assert_eq!([1u8; 32], signed.sender);
     assert_eq!(String::from("hello"), signed.route);
-    assert_eq!(0u16, signed.msgid);
+    assert_eq!(0, signed.msgid);
 
     let bits = signed.try_to_vec().unwrap();
     let back = SignedTransaction::try_from_slice(&bits[..]).unwrap();

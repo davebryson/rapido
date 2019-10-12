@@ -80,7 +80,7 @@ impl Service for CounterService {
 
     fn decode_tx(
         &self,
-        _msgid: u16,
+        _msgid: u8,
         payload: Vec<u8>,
     ) -> Result<Box<dyn Transaction>, std::io::Error> {
         // We don't check for msgid
@@ -128,7 +128,7 @@ fn my_validate_tx(tx: &SignedTransaction, _snapshot: &Box<dyn Snapshot>) -> TxRe
 
 // Test helpers
 fn gen_and_sign_tx(acct: AccountId, sk: &SecretKey, msg: SetCountMsg) -> Vec<u8> {
-    let mut signed = SignedTransaction::new(acct, ROUTE_NAME, 0u16, msg);
+    let mut signed = SignedTransaction::new(acct, ROUTE_NAME, 0, msg);
     assert!(sign_transaction(&mut signed, &sk).is_ok());
     let encoded = signed.try_to_vec();
     assert!(encoded.is_ok());

@@ -139,7 +139,7 @@ impl Service for CryptocurrencyService {
         CRYPTO_SERVICE_ROUTE_NAME.into()
     }
 
-    fn decode_tx(&self, msgid: u16, payload: Vec<u8>) -> Result<Box<dyn Transaction>, Error> {
+    fn decode_tx(&self, msgid: u8, payload: Vec<u8>) -> Result<Box<dyn Transaction>, Error> {
         let bits = &payload[..];
         match msgid {
             0 => CreateAcctTx::into_boxed_tx(bits),

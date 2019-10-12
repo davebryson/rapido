@@ -64,7 +64,7 @@ fn run_app() {
 fn create_account(sender: String) {
     let client = RpcClient::new(TMURL);
     let n = get_account(&sender).unwrap();
-    let tx = SignedTransaction::new(n, CRYPTO_SERVICE_ROUTE_NAME, 0u16, CreateAcctTx {});
+    let tx = SignedTransaction::new(n, CRYPTO_SERVICE_ROUTE_NAME, 0, CreateAcctTx {});
     let encoded = tx.try_to_vec().unwrap();
     let result = client.broadcast_tx_commit(encoded).unwrap();
     println!("create account: {:?}", result);
@@ -94,7 +94,7 @@ fn query_account(sender: String) {
 fn deposit_to_account(sender: String, amt: u64) {
     let client = RpcClient::new(TMURL);
     let n = get_account(&sender).unwrap();
-    let tx = SignedTransaction::new(n, CRYPTO_SERVICE_ROUTE_NAME, 1u16, DepositTx(amt));
+    let tx = SignedTransaction::new(n, CRYPTO_SERVICE_ROUTE_NAME, 1, DepositTx(amt));
     let encoded = tx.try_to_vec().unwrap();
     let result = client.broadcast_tx_commit(encoded).unwrap();
     println!("deposit made: {:?}", result);
@@ -108,7 +108,7 @@ fn transfer_some(sender: String, recip: String, amt: u64) {
     let tx = SignedTransaction::new(
         sender_from,
         CRYPTO_SERVICE_ROUTE_NAME,
-        2u16,
+        2,
         TransferTx(recip, amt),
     );
     let encoded = tx.try_to_vec().unwrap();

@@ -9,7 +9,7 @@ use failure::ensure;
 pub const ACCOUNT_ID_LENGTH: usize = 32;
 
 /// A user-friendly type for [u8; 32] used to identify an account
-/// TODO: Just make this a Hash...
+/// TODO: Make this into AccountAddress([u8; 32]).  Needs to implement BinaryKey & Borsh
 pub type AccountId = [u8; ACCOUNT_ID_LENGTH];
 
 /// Function type for the abci checkTx handler.  This function should
@@ -38,7 +38,7 @@ pub trait Service: Sync + Send {
     // user-assigned 'msgid'.
     fn decode_tx(
         &self,
-        msgid: u16,
+        msgid: u8,
         payload: Vec<u8>,
     ) -> Result<Box<dyn Transaction>, std::io::Error>;
 
@@ -155,7 +155,7 @@ pub trait Transaction: Send + Sync {
 pub struct SignedTransaction {
     pub sender: AccountId,
     pub route: String,
-    pub msgid: u16,
+    pub msgid: u8,
     pub payload: Vec<u8>,
     pub signature: Vec<u8>,
 }
@@ -163,7 +163,7 @@ pub struct SignedTransaction {
 // TODO: Should hide Borsh: encode() decode()
 impl SignedTransaction {
     // Create a new SignedTransaction
-    pub fn new<R, M>(sender: AccountId, route: R, msgid: u16, msg: M) -> Self
+    pub fn new<R, M>(sender: AccountId, route: R, msgid: u8, msg: M) -> Self
     where
         R: Into<String>,
         M: BorshSerialize + BorshDeserialize + Transaction,
@@ -184,15 +184,18 @@ impl CryptoHash for SignedTransaction {
         // Need to clean up this mess...
         let mut sender_bits = vec![0u8; 32];
         sender_bits.copy_from_slice(&self.sender[..].to_vec());
-        let route_bits = self.route.as_bytes().to_vec();
-        let mut msgid_bits = vec![0u8; 2];
-        msgid_bits.copy_from_slice(&self.msgid.to_le_bytes());
+        //let route_bits = self.route.as_bytes().to_vec();
 
         // Hash order: sender, route, msgid, payload
-        let contents: Vec<u8> = vec![sender_bits, route_bits, msgid_bits, self.payload.clone()]
-            .into_iter()
-            .flatten()
-            .collect();
+        let contents: Vec<u8> = vec![
+            sender_bits,
+            self.route.as_bytes().to_vec(),
+            vec![self.msgid],
+            self.payload.clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
 
         exonum_crypto::hash(&contents[..])
     }
