@@ -61,9 +61,10 @@ impl AppBuilder {
 }
 
 // abci result codes used by the node
-pub const TXERR_CODE_SIGNED_TX: u32 = 100;
-pub const TXERR_CODE_SERVICE_NOT_FOUND: u32 = 101;
-pub const TXERR_CODE_DECODE_TX: u32 = 102;
+pub const SERVICE_NOT_FOUND: u32 = 100;
+pub const TXERR_SIGNED_TX: u32 = 101;
+pub const TXERR_DECODE_TX: u32 = 102;
+pub const QUERYERR_NO_ROUTE: u32 = 103;
 
 /// The application node implements the abci application trait and provides
 /// functionality to execute services and manage storage.
@@ -104,7 +105,7 @@ impl Node {
             Ok(tx) => tx,
             Err(e) => {
                 return TxResult::error(
-                    TXERR_CODE_SIGNED_TX,
+                    TXERR_SIGNED_TX,
                     format!("Err parsing SignedTransaction: {:?}", &e),
                 )
             }
@@ -113,7 +114,7 @@ impl Node {
         // Return err if there are no services matching the route
         if !self.services.contains_key(&tx.route) {
             return TxResult::error(
-                TXERR_CODE_SERVICE_NOT_FOUND,
+                SERVICE_NOT_FOUND,
                 format!("Service not found for route: {}", tx.route),
             );
         }
@@ -129,15 +130,13 @@ impl Node {
 
         // Run DeliverTx
         let fork = self.db.fork();
-        let service = self.services.get(&tx.route).unwrap();
-        let result = match service.decode_tx(tx.msgid, tx.payload) {
-            Ok(handler) => handler.execute(tx.sender, &fork),
-            Err(e) => {
-                return TxResult::error(
-                    TXERR_CODE_DECODE_TX,
-                    format!("Err decoding transaction: {}", e),
-                )
-            }
+        let result = match self
+            .services
+            .get(&tx.route)
+            .and_then(|s| s.decode_tx(tx.msgid, tx.payload.clone()).ok())
+        {
+            Some(handler) => handler.execute(tx.sender, &fork),
+            None => return TxResult::error(TXERR_DECODE_TX, "Err decoding transaction"),
         };
 
         if result.code == 0 {
@@ -197,7 +196,7 @@ impl abci::Application for Node {
         let (route, query_path) = match parse_abci_query_path(&req.path) {
             Some(tuple) => tuple,
             None => {
-                response.code = 10;
+                response.code = QUERYERR_NO_ROUTE;
                 response.key = req.data.clone();
                 response.log = "No query path found.  Format should be 'route/apppath'".into();
                 return response;
@@ -207,18 +206,19 @@ impl abci::Application for Node {
         // Check if a service exists for this route
         let route_as_string: &String = &route.into();
         if !self.services.contains_key(route_as_string) {
-            response.code = 10;
+            response.code = SERVICE_NOT_FOUND;
             response.log = format!("cannot find query service for {}", route);
             return response;
         }
 
         // Call the service
         let snapshot = self.db.snapshot();
-        let result =
-            self.services
-                .get(route_as_string)
-                .unwrap()
-                .query(query_path.into(), key, &snapshot);
+        let result = self
+            .services
+            .get(route_as_string)
+            .unwrap() // <= we unwrap here, because we already checked for it above.
+            // So, panic here if something else occurs
+            .query(query_path.into(), key, &snapshot);
 
         // Return the result
         response.code = result.code;
@@ -247,7 +247,7 @@ impl abci::Application for Node {
     fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
         // Commit accumulated patches to storage and clear commit_patches vec.
         for patch in self.commit_patches.drain(..) {
-            self.db.merge(patch).unwrap();
+            self.db.merge(patch).expect("abci:commit patches");
         }
 
         let fork = self.db.fork();
@@ -269,7 +269,9 @@ impl abci::Application for Node {
         });
 
         // Merge new commits into to db
-        self.db.merge(fork.into_patch()).unwrap();
+        self.db
+            .merge(fork.into_patch())
+            .expect("abci:commit appstate");
 
         let mut resp = ResponseCommit::new();
         resp.set_data(self.app_state.hash.clone());

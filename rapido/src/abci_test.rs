@@ -193,7 +193,7 @@ fn test_abci_works() {
         query.path = "shouldfail".into();
         query.data = dave[..].to_vec();
         let qresp = app.query(&query);
-        assert_eq!(10u32, qresp.code);
+        assert_eq!(103u32, qresp.code);
     }
 
     {
@@ -202,7 +202,16 @@ fn test_abci_works() {
         query.path = "/".into();
         query.data = dave[..].to_vec();
         let qresp = app.query(&query);
-        assert_eq!(10u32, qresp.code);
+        assert_eq!(103u32, qresp.code);
+    }
+
+    {
+        // Should fail
+        let mut query = RequestQuery::new();
+        query.path = "noserviceregistered/".into();
+        query.data = dave[..].to_vec();
+        let qresp = app.query(&query);
+        assert_eq!(100u32, qresp.code);
     }
 
     {
