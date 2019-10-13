@@ -1,11 +1,15 @@
 ///!
 ///! Rapido is a Rust framework for building Tendermint applications via ABCI.
 ///!
-pub use self::api::{
-    sign_transaction, verify_tx_signature, AccountId, QueryResult, Service, SignedTransaction,
-    Transaction, TxResult, ValidateTxHandler,
+pub use self::{
+    account_address::{AccountAddress,ACCT_ADDRESS_LENGTH},
+    api::{
+        sign_transaction, verify_tx_signature, QueryResult, Service, SignedTransaction,
+        Transaction, TxResult, ValidateTxHandler,
+    },
 };
 
+mod account_address;
 mod api;
 mod appstate;
 

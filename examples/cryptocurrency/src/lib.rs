@@ -4,10 +4,13 @@ use exonum_merkledb::{
     impl_object_hash_for_binary_value, BinaryValue, Fork, ObjectAccess, ObjectHash, ProofMapIndex,
     RefMut, Snapshot,
 };
-use std::io::{Error, ErrorKind};
-use std::{borrow::Cow, convert::AsRef};
-
-use rapido::{AccountId, QueryResult, Service, Transaction, TxResult};
+use rapido::{AccountAddress, QueryResult, Service, Transaction, TxResult};
+use std::{
+    borrow::Cow,
+    convert::AsRef,
+    convert::TryFrom,
+    io::{Error, ErrorKind},
+};
 
 pub const CRYPTO_SERVICE_ROUTE_NAME: &str = "cryptoapp";
 
@@ -23,7 +26,7 @@ impl CreateAcctTx {
 
 impl Transaction for CreateAcctTx {
     // Free accounts! it's an example...
-    fn execute(&self, sender: AccountId, fork: &Fork) -> TxResult {
+    fn execute(&self, sender: AccountAddress, fork: &Fork) -> TxResult {
         let mut store = SchemaStore::new(fork).state();
         if store.contains(&sender) {
             return TxResult::error(12, "account already exists");
@@ -53,7 +56,7 @@ impl DepositTx {
 
 impl Transaction for DepositTx {
     // Only you can deposit into your account
-    fn execute(&self, sender: AccountId, fork: &Fork) -> TxResult {
+    fn execute(&self, sender: AccountAddress, fork: &Fork) -> TxResult {
         let deposit = self.0;
 
         let mut store = SchemaStore::new(fork).state();
@@ -70,7 +73,7 @@ impl Transaction for DepositTx {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
-pub struct TransferTx(pub AccountId, pub u64); // msgid=2
+pub struct TransferTx(pub AccountAddress, pub u64); // msgid=2
 impl TransferTx {
     pub fn into_boxed_tx(payload: &[u8]) -> Result<Box<dyn Transaction>, Error> {
         let msg = Self::try_from_slice(payload)?;
@@ -79,7 +82,7 @@ impl TransferTx {
 }
 
 impl Transaction for TransferTx {
-    fn execute(&self, sender: AccountId, fork: &Fork) -> TxResult {
+    fn execute(&self, sender: AccountAddress, fork: &Fork) -> TxResult {
         let recipient = self.0;
         let transfer_amount = self.1;
         let mut store = SchemaStore::new(fork).state();
@@ -103,7 +106,7 @@ impl Transaction for TransferTx {
 // Storage Model
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
 pub struct Account {
-    pub account: AccountId,
+    pub account: AccountAddress,
     pub balance: u64,
 }
 
@@ -127,7 +130,7 @@ impl<T: ObjectAccess> SchemaStore<T> {
         Self(object_access)
     }
 
-    pub fn state(&self) -> RefMut<ProofMapIndex<T, AccountId, Account>> {
+    pub fn state(&self) -> RefMut<ProofMapIndex<T, AccountAddress, Account>> {
         self.0.get_object(CRYPTO_SERVICE_ROUTE_NAME)
     }
 }
@@ -150,15 +153,13 @@ impl Service for CryptocurrencyService {
     }
 
     fn query(&self, _path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
-        //println!("INCOMING KEY: {:?}", base64::decode(&key.clone()[..]));
-        //let nkey = base64::decode(&key.clone()[..]).unwrap();
-        if key.len() != 32 {
+        let acct = AccountAddress::try_from(key);
+        if acct.is_err() {
             return QueryResult::error(22);
         }
+
         let schema = SchemaStore::new(snapshot);
-        let mut acct = [0u8; 32];
-        acct.copy_from_slice(&key[..]);
-        if let Some(account) = schema.state().get(&acct) {
+        if let Some(account) = schema.state().get(&acct.unwrap()) {
             let bits = account.into_bytes();
             return QueryResult::ok(bits);
         }

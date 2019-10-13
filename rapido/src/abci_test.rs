@@ -4,10 +4,11 @@ use exonum_crypto::{gen_keypair, Hash, SecretKey};
 use exonum_merkledb::{
     Fork, ObjectAccess, ObjectHash, ProofMapIndex, RefMut, Snapshot, TemporaryDB,
 };
+use std::convert::TryFrom;
 use std::sync::Arc;
 
 use super::{
-    sign_transaction, AccountId, AppBuilder, Node, QueryResult, Service, SignedTransaction,
+    sign_transaction, AccountAddress, AppBuilder, Node, QueryResult, Service, SignedTransaction,
     Transaction, TxResult,
 };
 
@@ -25,22 +26,22 @@ impl<T: ObjectAccess> SchemaStore<T> {
         Self(object_access)
     }
 
-    pub fn add_account(&self, account: &AccountId) {
+    pub fn add_account(&self, account: &AccountAddress) {
         self.store().put(&account, 0u8);
     }
 
-    pub fn store(&self) -> RefMut<ProofMapIndex<T, AccountId, u8>> {
+    pub fn store(&self) -> RefMut<ProofMapIndex<T, AccountAddress, u8>> {
         self.0.get_object(ROUTE_NAME)
     }
 
-    pub fn get_current_count(&self, account: &AccountId) -> u8 {
+    pub fn get_current_count(&self, account: &AccountAddress) -> u8 {
         match self.store().get(account) {
             Some(v) => v,
             None => 0u8,
         }
     }
 
-    pub fn set_next_count(&self, account: &AccountId, value: u8) {
+    pub fn set_next_count(&self, account: &AccountAddress, value: u8) {
         self.store().put(account, value);
     }
 }
@@ -52,7 +53,7 @@ impl Transaction for SetCountMsg {
     // App logic:
     // Set the value in state. Rule: the 'value' must be the expected next number.
     // If not, error.
-    fn execute(&self, sender: AccountId, fork: &Fork) -> TxResult {
+    fn execute(&self, sender: AccountAddress, fork: &Fork) -> TxResult {
         let schema = SchemaStore::new(fork);
         let current = schema.get_current_count(&sender);
         let expected_next_value = current + 1;
@@ -72,7 +73,7 @@ impl Service for CounterService {
     }
 
     fn genesis(&self, fork: &Fork) -> TxResult {
-        let dave = [1u8; 32]; // Genesis account
+        let dave = AccountAddress::new([1u8; 32]); // Genesis account
         let schema = SchemaStore::new(fork);
         schema.add_account(&dave);
         TxResult::ok()
@@ -91,13 +92,11 @@ impl Service for CounterService {
     fn query(&self, path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
         if path == "/" {
             let schema = SchemaStore::new(snapshot);
-            let mut acct = [0u8; 32];
-            if key.len() != 32 {
+            let acct = AccountAddress::try_from(key);
+            if acct.is_err() {
                 QueryResult::error(10);
             }
-            acct.copy_from_slice(&key[..]);
-            let value = schema.get_current_count(&acct);
-
+            let value = schema.get_current_count(&acct.unwrap());
             return QueryResult::ok(vec![value]);
         }
 
@@ -120,16 +119,16 @@ impl Service for CounterService {
 
 // CheckTx Handler
 fn my_validate_tx(tx: &SignedTransaction, _snapshot: &Box<dyn Snapshot>) -> TxResult {
-    if tx.sender != [1u8; 32] {
+    if tx.sender != AccountAddress::new([1u8; 32]) {
         return TxResult::error(1, "bad account amigo..");
     }
     TxResult::ok()
 }
 
 // Test helpers
-fn gen_and_sign_tx(acct: AccountId, sk: &SecretKey, msg: SetCountMsg) -> Vec<u8> {
+fn gen_and_sign_tx(acct: AccountAddress, sk: &SecretKey, msg: SetCountMsg) -> Vec<u8> {
     let mut signed = SignedTransaction::new(acct, ROUTE_NAME, 0, msg);
-    assert!(sign_transaction(&mut signed, &sk).is_ok());
+    sign_transaction(&mut signed, &sk);
     let encoded = signed.try_to_vec();
     assert!(encoded.is_ok());
     encoded.unwrap()
@@ -160,13 +159,13 @@ fn test_abci_works() {
         .finish();
 
     let (_pk, sk) = gen_keypair();
-    let dave = [1u8; 32]; // test account add on genesis() in service
+    let dave = AccountAddress::new([1u8; 32]); // test account add on genesis() in service
 
     assert_check_tx(&mut app, gen_and_sign_tx(dave, &sk, SetCountMsg(1)), 0u32);
     // Should fail (bad account)
     assert_check_tx(
         &mut app,
-        gen_and_sign_tx([3u8; 32], &sk, SetCountMsg(1)),
+        gen_and_sign_tx(AccountAddress::new([3u8; 32]), &sk, SetCountMsg(1)),
         1u32,
     );
 
@@ -181,7 +180,8 @@ fn test_abci_works() {
     {
         let mut query = RequestQuery::new();
         query.path = format!("{}/", ROUTE_NAME);
-        query.data = dave[..].to_vec();
+        //query.data = dave[..].to_vec();
+        query.data = dave.to_vec();
         let qresp = app.query(&query);
         assert_eq!(0u32, qresp.code);
         assert_eq!(vec![2], qresp.value);
@@ -191,7 +191,8 @@ fn test_abci_works() {
         // Should fail
         let mut query = RequestQuery::new();
         query.path = "shouldfail".into();
-        query.data = dave[..].to_vec();
+        //query.data = dave[..].to_vec();
+        query.data = dave.to_vec();
         let qresp = app.query(&query);
         assert_eq!(103u32, qresp.code);
     }
@@ -200,7 +201,8 @@ fn test_abci_works() {
         // Should fail
         let mut query = RequestQuery::new();
         query.path = "/".into();
-        query.data = dave[..].to_vec();
+        //query.data = dave[..].to_vec();
+        query.data = dave.to_vec();
         let qresp = app.query(&query);
         assert_eq!(103u32, qresp.code);
     }
@@ -209,7 +211,8 @@ fn test_abci_works() {
         // Should fail
         let mut query = RequestQuery::new();
         query.path = "noserviceregistered/".into();
-        query.data = dave[..].to_vec();
+        //query.data = dave[..].to_vec();
+        query.data = dave.to_vec();
         let qresp = app.query(&query);
         assert_eq!(100u32, qresp.code);
     }

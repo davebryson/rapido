@@ -8,7 +8,7 @@ use structopt::StructOpt;
 use cryptocurrency::{
     Account, CreateAcctTx, CryptocurrencyService, DepositTx, TransferTx, CRYPTO_SERVICE_ROUTE_NAME,
 };
-use rapido::{AccountId, SignedTransaction};
+use rapido::{AccountAddress, SignedTransaction};
 use rapido_client::RpcClient;
 
 const TMURL: &str = "http://127.0.0.1:26657";
@@ -38,12 +38,12 @@ pub enum Commands {
 }
 
 // Map accounts for ease of use
-fn get_account(name: &str) -> Option<AccountId> {
+fn get_account(name: &str) -> Option<AccountAddress> {
     match name {
-        "dave" => Some([1u8; 32]),
-        "bob" => Some([2u8; 32]),
-        "alice" => Some([3u8; 32]),
-        "tom" => Some([3u8; 32]),
+        "dave" => Some(AccountAddress::new([1u8; 32])),
+        "bob" => Some(AccountAddress::new([2u8; 32])),
+        "alice" => Some(AccountAddress::new([3u8; 32])),
+        "tom" => Some(AccountAddress::new([3u8; 32])),
         _ => None,
     }
 }
@@ -74,7 +74,7 @@ fn create_account(sender: String) {
 fn query_account(sender: String) {
     let client = RpcClient::new(TMURL);
     let n = get_account(&sender).unwrap();
-    let result = client.abci_query("cryptoapp/", n[..].to_vec()).unwrap();
+    let result = client.abci_query("cryptoapp/", n.to_vec()).unwrap();
 
     // Parse into Json so we can access it
     let packet = json::parse(&result).unwrap();

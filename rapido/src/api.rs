@@ -2,15 +2,8 @@ use abci::{ResponseCheckTx, ResponseDeliverTx};
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{CryptoHash, Hash, PublicKey, SecretKey, Signature};
 use exonum_merkledb::{Fork, Snapshot};
-use failure::ensure;
 
-/// Maximum length of an AccountId used in
-/// the sender field of a signed transaction.
-pub const ACCOUNT_ID_LENGTH: usize = 32;
-
-/// A user-friendly type for [u8; 32] used to identify an account
-/// TODO: Make this into AccountAddress([u8; 32]).  Needs to implement BinaryKey & Borsh
-pub type AccountId = [u8; ACCOUNT_ID_LENGTH];
+use crate::account_address::AccountAddress;
 
 /// Function type for the abci checkTx handler.  This function should
 /// contain the logic to determine whether to accept or reject transactions
@@ -145,7 +138,7 @@ impl QueryResult {
 /// during the abci 'deliver_tx' function.
 /// TODO: Change this to require Borsh as well??
 pub trait Transaction: Send + Sync {
-    fn execute(&self, sender: AccountId, fork: &Fork) -> TxResult;
+    fn execute(&self, sender: AccountAddress, fork: &Fork) -> TxResult;
 }
 
 /// SignedTransaction is used to transport transactions from the client to the your
@@ -153,7 +146,7 @@ pub trait Transaction: Send + Sync {
 /// Note: This will evolve to provide more flexibilty in the future...
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct SignedTransaction {
-    pub sender: AccountId,
+    pub sender: AccountAddress,
     pub route: String,
     pub msgid: u8,
     pub payload: Vec<u8>,
@@ -163,7 +156,7 @@ pub struct SignedTransaction {
 // TODO: Should hide Borsh: encode() decode()
 impl SignedTransaction {
     // Create a new SignedTransaction
-    pub fn new<R, M>(sender: AccountId, route: R, msgid: u8, msg: M) -> Self
+    pub fn new<R, M>(sender: AccountAddress, route: R, msgid: u8, msg: M) -> Self
     where
         R: Into<String>,
         M: BorshSerialize + BorshDeserialize + Transaction,
@@ -182,13 +175,14 @@ impl SignedTransaction {
 impl CryptoHash for SignedTransaction {
     fn hash(&self) -> Hash {
         // Need to clean up this mess...
-        let mut sender_bits = vec![0u8; 32];
-        sender_bits.copy_from_slice(&self.sender[..].to_vec());
+        //let mut sender_bits = vec![0u8; 32];
+        //sender_bits.copy_from_slice(&self.sender[..].to_vec());
+
         //let route_bits = self.route.as_bytes().to_vec();
 
         // Hash order: sender, route, msgid, payload
         let contents: Vec<u8> = vec![
-            sender_bits,
+            self.sender.to_vec(),
             self.route.as_bytes().to_vec(),
             vec![self.msgid],
             self.payload.clone(),
@@ -211,13 +205,9 @@ pub fn verify_tx_signature(tx: &SignedTransaction, public_key: &PublicKey) -> bo
 }
 
 // Sign a transaction
-pub fn sign_transaction(
-    tx: &mut SignedTransaction,
-    private_key: &SecretKey,
-) -> Result<(), failure::Error> {
-    ensure!(tx.sender.len() == ACCOUNT_ID_LENGTH, "AccountId is empty");
+pub fn sign_transaction(tx: &mut SignedTransaction, private_key: &SecretKey) {
+    //ensure!(tx.sender.len() == ACCT_ADDRESS_LENGTH, "AccountId is empty");
     tx.signature = exonum_crypto::sign(&tx.hash()[..], private_key)
         .as_ref()
         .into();
-    Ok(())
 }
