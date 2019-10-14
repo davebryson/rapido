@@ -37,14 +37,9 @@ pub trait Service: Sync + Send {
 
     // Main entry point for abci request queries. 'snapshot' provides
     // read-only access to storage.  You can use path to do your own routing
-    // for internal handlers.  NOTE: For now, I use a bit of a hack to map
-    // query requests to services.   Clients sending queries should use the
-    // form 'routename**your_application_path' in RequestQuery.data.
-    // Where 'routename' IS the service route name. The value '**' is used
-    // internally as a seperator, and 'your_application_path' is specific to your application.
-    // So, if request_query.data == 'routename**your_application_path', then:
-    //   'routename' == the service route name
-    //   'your_application_path' is the application specific path.
+    // for internal handlers. path below is extracted from the AbciQuery.path.
+    // Proper queries should be in the form: 'routename/path', where 'routename'
+    // is the name of the service, and 'path' is used within this method.
     fn query(&self, path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult;
 
     // This function is called on ABCI commit to accumulate a new
@@ -114,18 +109,21 @@ impl Into<ResponseDeliverTx> for TxResult {
     }
 }
 
-/// Type returned from a service query handler.  QueryResults will be
+/// Returned from a service query handler.  QueryResults will be
 /// converted to proper abci types internally.
+/// TODO: Expand to include proof.
 pub struct QueryResult {
     pub code: u32,
     pub value: Vec<u8>,
 }
 
 impl QueryResult {
+    // Ok: `value` is the result to return from running the query
     pub fn ok(value: Vec<u8>) -> Self {
         Self { code: 0, value }
     }
 
+    // Error: provide a code
     pub fn error(code: u32) -> Self {
         Self {
             code,
@@ -134,15 +132,17 @@ impl QueryResult {
     }
 }
 
-/// Main trait to implement for your application transactions.  Execute is ran
+/// Main trait to implement for your application transactions.  `execute()` is ran
 /// during the abci 'deliver_tx' function.
-/// TODO: Change this to require Borsh as well??
 pub trait Transaction: Send + Sync {
+    // Execute the logic associated with this transaction. Implement your
+    // business logic here. `Fork` provides mutable access to the associated state store.
+    // AccountAddress is provided by the SignedTransaction used to transport this tx.
     fn execute(&self, sender: AccountAddress, fork: &Fork) -> TxResult;
 }
 
 /// SignedTransaction is used to transport transactions from the client to the your
-/// application.  The provide a wrapper around application transactions.
+/// application. It provides a wrapper around application specific transactions/messages.
 /// Note: This will evolve to provide more flexibilty in the future...
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct SignedTransaction {
@@ -174,12 +174,6 @@ impl SignedTransaction {
 
 impl CryptoHash for SignedTransaction {
     fn hash(&self) -> Hash {
-        // Need to clean up this mess...
-        //let mut sender_bits = vec![0u8; 32];
-        //sender_bits.copy_from_slice(&self.sender[..].to_vec());
-
-        //let route_bits = self.route.as_bytes().to_vec();
-
         // Hash order: sender, route, msgid, payload
         let contents: Vec<u8> = vec![
             self.sender.to_vec(),
@@ -190,7 +184,6 @@ impl CryptoHash for SignedTransaction {
         .into_iter()
         .flatten()
         .collect();
-
         exonum_crypto::hash(&contents[..])
     }
 }
@@ -206,7 +199,6 @@ pub fn verify_tx_signature(tx: &SignedTransaction, public_key: &PublicKey) -> bo
 
 // Sign a transaction
 pub fn sign_transaction(tx: &mut SignedTransaction, private_key: &SecretKey) {
-    //ensure!(tx.sender.len() == ACCT_ADDRESS_LENGTH, "AccountId is empty");
     tx.signature = exonum_crypto::sign(&tx.hash()[..], private_key)
         .as_ref()
         .into();
