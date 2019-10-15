@@ -177,8 +177,9 @@ impl SignedTransaction {
         }
     }
 
-    /// Convenience method to encode the transaction using BorshSerialization.
-    /// `panics` on serialization error.
+    /// Convenience method to encode the transaction using BorshSerialization
+    /// without having to import the associated trait.
+    /// Will `panic` on a serialization error.
     pub fn encode(&self) -> Vec<u8> {
         self.try_to_vec().expect("encoding signed transaction")
     }
