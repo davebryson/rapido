@@ -176,6 +176,12 @@ impl SignedTransaction {
             signature: Default::default(),
         }
     }
+
+    /// Convenience method to encode the transaction using BorshSerialization.
+    /// `panics` on serialization error.
+    pub fn encode(&self) -> Vec<u8> {
+        self.try_to_vec().expect("encoding signed transaction")
+    }
 }
 
 impl CryptoHash for SignedTransaction {

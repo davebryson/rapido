@@ -1,4 +1,3 @@
-use borsh::BorshSerialize;
 use exonum_merkledb::{BinaryValue, TemporaryDB};
 use rapido::AppBuilder;
 use std::borrow::Cow;
@@ -65,7 +64,8 @@ fn create_account(sender: String) {
     let client = RpcClient::new(TMURL);
     let n = get_account(&sender).unwrap();
     let tx = SignedTransaction::new(n, CRYPTO_SERVICE_ROUTE_NAME, 0, CreateAcctTx {});
-    let encoded = tx.try_to_vec().unwrap();
+    //let encoded = tx.try_to_vec().unwrap();
+    let encoded = tx.encode();
     let result = client.broadcast_tx_commit(encoded).unwrap();
     println!("create account: {:?}", result);
 }
@@ -95,7 +95,8 @@ fn deposit_to_account(sender: String, amt: u64) {
     let client = RpcClient::new(TMURL);
     let n = get_account(&sender).unwrap();
     let tx = SignedTransaction::new(n, CRYPTO_SERVICE_ROUTE_NAME, 1, DepositTx(amt));
-    let encoded = tx.try_to_vec().unwrap();
+    //let encoded = tx.try_to_vec().unwrap();
+    let encoded = tx.encode();
     let result = client.broadcast_tx_commit(encoded).unwrap();
     println!("deposit made: {:?}", result);
 }
@@ -111,7 +112,8 @@ fn transfer_some(sender: String, recip: String, amt: u64) {
         2,
         TransferTx(recip, amt),
     );
-    let encoded = tx.try_to_vec().unwrap();
+    //let encoded = tx.try_to_vec().unwrap();
+    let encoded = tx.encode();
     let result = client.broadcast_tx_commit(encoded).unwrap();
     println!("transfer made: {:?}", result);
 }
