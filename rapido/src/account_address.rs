@@ -4,21 +4,23 @@ use exonum_merkledb::{BinaryKey, ObjectHash};
 use failure::ensure;
 use std::{convert::TryFrom, fmt, str::FromStr};
 
+/// Size of the Account Address
 pub const ACCT_ADDRESS_LENGTH: usize = 32;
 
 // Could make this generic for the app
 pub type AccountAddressResult = Result<AccountAddress, failure::Error>;
 
-/// AccountAddress is a container for unique account identifiers. It can
-/// be used as an exonum_merkle_db storage key.
+/// AccountAddress is a container for unique account identifiers.
 #[derive(BorshSerialize, BorshDeserialize, Ord, PartialOrd, Eq, PartialEq, Default, Clone, Copy)]
 pub struct AccountAddress([u8; ACCT_ADDRESS_LENGTH]);
 
 impl AccountAddress {
+    /// Create a new AccountAddress
     pub const fn new(address: [u8; ACCT_ADDRESS_LENGTH]) -> Self {
         Self(address)
     }
 
+    /// Convert the AccountAddress to a Vec<u8>
     pub fn to_vec(&self) -> Vec<u8> {
         self.0.to_vec()
     }

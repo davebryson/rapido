@@ -38,10 +38,10 @@ impl Service for MyService {
 
     fn decode_tx(
         &self,
-        msgid: u8,
+        txid: u8,
         payload: Vec<u8>,
     ) -> Result<Box<dyn Transaction>, std::io::Error> {
-        match msgid {
+        match txid {
             0 => {
                 let m = HelloMsgOne::try_from_slice(&payload[..])?;
                 Ok(Box::new(m))
@@ -107,7 +107,7 @@ fn test_with_signed_tx() {
 
     assert_eq!(AccountAddress::new([1u8; 32]), signed.sender);
     assert_eq!(String::from("hello"), signed.route);
-    assert_eq!(0, signed.msgid);
+    assert_eq!(0, signed.txid);
 
     let bits = signed.try_to_vec().unwrap();
     let back = SignedTransaction::try_from_slice(&bits[..]).unwrap();

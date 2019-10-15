@@ -16,7 +16,7 @@ pub const CRYPTO_SERVICE_ROUTE_NAME: &str = "cryptoapp";
 
 /** Transactions  */
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
-pub struct CreateAcctTx; // msgid=0
+pub struct CreateAcctTx; // txid=0
 impl CreateAcctTx {
     pub fn into_boxed_tx(payload: &[u8]) -> Result<Box<dyn Transaction>, Error> {
         let msg = Self::try_from_slice(payload)?;
@@ -46,7 +46,7 @@ impl Transaction for CreateAcctTx {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
-pub struct DepositTx(pub u64); // msgid=1
+pub struct DepositTx(pub u64); // txid=1
 impl DepositTx {
     pub fn into_boxed_tx(payload: &[u8]) -> Result<Box<dyn Transaction>, Error> {
         let msg = Self::try_from_slice(payload)?;
@@ -73,7 +73,7 @@ impl Transaction for DepositTx {
 }
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
-pub struct TransferTx(pub AccountAddress, pub u64); // msgid=2
+pub struct TransferTx(pub AccountAddress, pub u64); // txid=2
 impl TransferTx {
     pub fn into_boxed_tx(payload: &[u8]) -> Result<Box<dyn Transaction>, Error> {
         let msg = Self::try_from_slice(payload)?;
@@ -142,9 +142,9 @@ impl Service for CryptocurrencyService {
         CRYPTO_SERVICE_ROUTE_NAME.into()
     }
 
-    fn decode_tx(&self, msgid: u8, payload: Vec<u8>) -> Result<Box<dyn Transaction>, Error> {
+    fn decode_tx(&self, txid: u8, payload: Vec<u8>) -> Result<Box<dyn Transaction>, Error> {
         let bits = &payload[..];
-        match msgid {
+        match txid {
             0 => CreateAcctTx::into_boxed_tx(bits),
             1 => DepositTx::into_boxed_tx(bits),
             2 => TransferTx::into_boxed_tx(bits),

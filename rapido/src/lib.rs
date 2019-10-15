@@ -1,8 +1,12 @@
-///!
-///! Rapido is a Rust framework for building Tendermint applications via ABCI.
-///!
+//! Rapido is a Rust framework for building Tendermint applications via ABCI.
+//! It provides a high level API to assemble your application with:
+//! * flexible storage options via [Exonum MerkleDb](https://docs.rs/exonum-merkledb)
+//! * Elliptic curve crypto via [Exonum Crypto](https://docs.rs/exonum-crypto/)
+//! * deterministic message serialization via [Borsh](http://borsh.io/)
+//!
+
 pub use self::{
-    account_address::{AccountAddress,ACCT_ADDRESS_LENGTH},
+    account_address::{AccountAddress, ACCT_ADDRESS_LENGTH},
     api::{
         sign_transaction, verify_tx_signature, QueryResult, Service, SignedTransaction,
         Transaction, TxResult, ValidateTxHandler,
@@ -33,7 +37,7 @@ pub struct AppBuilder {
 }
 
 impl AppBuilder {
-    // Create a new builder with a Database handle
+    /// Create a new builder with the given Database handle
     pub fn new(db: Arc<dyn Database>) -> Self {
         Self {
             db,
@@ -41,21 +45,21 @@ impl AppBuilder {
             validate_tx_handler: None,
         }
     }
-    // Set the desired validation handler. If not set,
-    // checkTx will return 'ok' by default
+
+    /// Set the desired validation handler. If not set, checkTx will return 'ok' by default
     pub fn set_validation_handler(mut self, handler: ValidateTxHandler) -> Self {
         self.validate_tx_handler = Some(handler);
         self
     }
 
-    // Add a Service to the application
+    /// Add a Service to the application
     pub fn add_service(mut self, handler: Box<dyn Service>) -> Self {
         self.services.push(handler);
         self
     }
 
-    // Call to return a configured node. This consumes the underlying builder.
-    // Will panic if no services are set.
+    /// Call to return a configured node. This consumes the underlying builder.
+    /// Will panic if no services are set.
     pub fn finish(self) -> Node {
         if self.services.len() == 0 {
             panic!("No services configured!");
@@ -64,14 +68,17 @@ impl AppBuilder {
     }
 }
 
-// abci result codes used by the node
+/// abci result code: Service was not found
 pub const SERVICE_NOT_FOUND: u32 = 100;
+/// abci result code: Error decoding the signed transaction
 pub const TXERR_SIGNED_TX: u32 = 101;
+/// abci result code: Error decoding the application transaction/message
 pub const TXERR_DECODE_TX: u32 = 102;
+/// abci result code: No route found for the query
 pub const QUERYERR_NO_ROUTE: u32 = 103;
 
-/// The application node implements the abci application trait and provides
-/// functionality to execute services and manage storage.
+/// Node provides functionality to execute services and manage storage.  
+/// You should use the `AppBuilder` to create a Node.
 pub struct Node {
     db: Arc<dyn Database>,
     app_state: AppState,
@@ -81,7 +88,7 @@ pub struct Node {
 }
 
 impl Node {
-    // Create the app. This is called automatically when using the builder
+    /// Create a new Node. This is called automatically when using the builder.
     pub fn new(config: AppBuilder) -> Self {
         let db = config.db;
 
@@ -137,7 +144,7 @@ impl Node {
         let result = match self
             .services
             .get(&tx.route)
-            .and_then(|s| s.decode_tx(tx.msgid, tx.payload.clone()).ok())
+            .and_then(|s| s.decode_tx(tx.txid, tx.payload.clone()).ok())
         {
             Some(handler) => handler.execute(tx.sender, &fork),
             None => return TxResult::error(TXERR_DECODE_TX, "Err decoding transaction"),
@@ -151,10 +158,10 @@ impl Node {
     }
 }
 
-/// Parse a query route:  It expects query routes to be in the
-/// form: 'route/somepath', where 'route' is the name of the service,
-/// and '/somepath' is your application's specific path. If you
-/// want to just query on any key, use the form: 'route/'.
+// Parse a query route:  It expects query routes to be in the
+// form: 'route/somepath', where 'route' is the name of the service,
+// and '/somepath' is your application's specific path. If you
+// want to just query on any key, use the form: 'route/'.
 fn parse_abci_query_path(req_path: &String) -> Option<(&str, &str)> {
     req_path
         .find(REQ_QUERY_PATH_SEPERATOR)

@@ -81,10 +81,10 @@ impl Service for CounterService {
 
     fn decode_tx(
         &self,
-        _msgid: u8,
+        _txid: u8,
         payload: Vec<u8>,
     ) -> Result<Box<dyn Transaction>, std::io::Error> {
-        // We don't check for msgid
+        // We don't check for txid
         let m = SetCountMsg::try_from_slice(&payload[..])?;
         Ok(Box::new(m))
     }

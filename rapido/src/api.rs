@@ -14,39 +14,35 @@ pub type ValidateTxHandler = fn(tx: &SignedTransaction, snapshot: &Box<dyn Snaps
 /// Implement this trait for your Service. Each service is
 /// keyed by the application by the 'route'. So you use a unique route name.
 pub trait Service: Sync + Send {
-    // The routing name of the service. This cooresponds to
-    // the route field in a Tx.
+    /// The routing name of the service. This cooresponds to the route field in a Tx.
     fn route(&self) -> String;
 
-    // Called on first start-up of the application. Can be used to establish
-    // initial state in your application.
+    /// Called on first start-up of the application. Can be used to establish
+    /// initial state in your application.
     // TODO: Add validator info, and chain_id
     fn genesis(&self, _fork: &Fork) -> TxResult {
         TxResult::ok()
     }
 
-    // Decode incoming transactions for the applications.  Each service may contain
-    // 1 or more transactions the perform a state transistion. This should contain the
-    // logic needed to select the application transaction to decode based on the
-    // user-assigned 'msgid'.
-    fn decode_tx(
-        &self,
-        msgid: u8,
-        payload: Vec<u8>,
-    ) -> Result<Box<dyn Transaction>, std::io::Error>;
+    /// Decode incoming transactions for the applications.  Each service may contain
+    /// 1 or more transactions the perform a state transistion. This should contain the
+    /// logic needed to select the application transaction to decode based on the
+    /// user-assigned 'txid'.
+    fn decode_tx(&self, txid: u8, payload: Vec<u8>)
+        -> Result<Box<dyn Transaction>, std::io::Error>;
 
-    // Main entry point for abci request queries. 'snapshot' provides
-    // read-only access to storage.  You can use path to do your own routing
-    // for internal handlers. path below is extracted from the AbciQuery.path.
-    // Proper queries should be in the form: 'routename/path', where 'routename'
-    // is the name of the service, and 'path' is used within this method.
+    /// Main entry point for abci request queries. 'snapshot' provides
+    /// read-only access to storage.  You can use path to do your own routing
+    /// for internal handlers. path below is extracted from the AbciQuery.path.
+    /// Proper queries should be in the form: 'routename/path', where 'routename'
+    /// is the name of the service, and 'path' is used within this method.
     fn query(&self, path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult;
 
-    // This function is called on ABCI commit to accumulate a new
-    // root hash across all services. You should return the current
-    // root hash from you state store(s).  If your app uses more than one form
-    // of storage, you should return an accumulated hash of all your storage root hashes.
-    // The result of this function becomes the tendermint 'app hash'.
+    /// This function is called on ABCI commit to accumulate a new
+    /// root hash across all services. You should return the current
+    /// root hash from you state store(s).  If your app uses more than one form
+    /// of storage, you should return an accumulated hash of all your storage root hashes.
+    /// The result of this function becomes the tendermint 'app hash'.
     fn root_hash(&self, fork: &Fork) -> Hash;
 }
 
@@ -62,7 +58,7 @@ pub struct TxResult {
 }
 
 impl TxResult {
-    // Construct a new code and log/message
+    /// Construct a new code and log/message
     pub fn new<T: Into<String>>(code: u32, log: T) -> Self {
         Self {
             code,
@@ -70,7 +66,7 @@ impl TxResult {
         }
     }
 
-    // Returns a 0 (ok) code with and empty log message
+    /// Returns a 0 (ok) code with and empty log message
     pub fn ok() -> Self {
         Self {
             code: 0,
@@ -78,7 +74,7 @@ impl TxResult {
         }
     }
 
-    // Returns and error code with the reason
+    /// Returns and error code with the reason
     pub fn error<T: Into<String>>(code: u32, reason: T) -> Self {
         Self {
             code,
@@ -118,12 +114,12 @@ pub struct QueryResult {
 }
 
 impl QueryResult {
-    // Ok: `value` is the result to return from running the query
+    /// Ok: `value` is the result to return from running the query
     pub fn ok(value: Vec<u8>) -> Self {
         Self { code: 0, value }
     }
 
-    // Error: provide a code
+    /// Error: provide a code
     pub fn error(code: u32) -> Self {
         Self {
             code,
@@ -135,28 +131,33 @@ impl QueryResult {
 /// Main trait to implement for your application transactions.  `execute()` is ran
 /// during the abci 'deliver_tx' function.
 pub trait Transaction: Send + Sync {
-    // Execute the logic associated with this transaction. Implement your
-    // business logic here. `Fork` provides mutable access to the associated state store.
-    // AccountAddress is provided by the SignedTransaction used to transport this tx.
+    /// Execute the logic associated with this transaction. Implement your
+    /// business logic here. `Fork` provides mutable access to the associated state store.
+    /// AccountAddress is provided by the SignedTransaction used to transport this tx.
     fn execute(&self, sender: AccountAddress, fork: &Fork) -> TxResult;
 }
 
 /// SignedTransaction is used to transport transactions from the client to the your
-/// application. It provides a wrapper around application specific transactions/messages.
+/// application. It provides a wrapper around application specific transactions.
 /// Note: This will evolve to provide more flexibilty in the future...
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct SignedTransaction {
+    /// The sender/signer of the transaction
     pub sender: AccountAddress,
+    /// The unique route to the Service
     pub route: String,
-    pub msgid: u8,
+    /// An ID to identify the transaction. This can be used to determine which Transaction
+    /// to decode in `service.decode_tx`
+    pub txid: u8,
+    /// The encoded bits of the enclosed transaction
     pub payload: Vec<u8>,
+    /// Signature over the transaction
     pub signature: Vec<u8>,
 }
 
-// TODO: Should hide Borsh: encode() decode()
 impl SignedTransaction {
-    // Create a new SignedTransaction
-    pub fn new<R, M>(sender: AccountAddress, route: R, msgid: u8, msg: M) -> Self
+    /// Create a new SignedTransaction
+    pub fn new<R, M>(sender: AccountAddress, route: R, txid: u8, msg: M) -> Self
     where
         R: Into<String>,
         M: BorshSerialize + BorshDeserialize + Transaction,
@@ -165,7 +166,7 @@ impl SignedTransaction {
         Self {
             sender,
             route: route.into(),
-            msgid,
+            txid,
             payload,
             signature: Default::default(),
         }
@@ -174,11 +175,11 @@ impl SignedTransaction {
 
 impl CryptoHash for SignedTransaction {
     fn hash(&self) -> Hash {
-        // Hash order: sender, route, msgid, payload
+        // Hash order: sender, route, txid, payload
         let contents: Vec<u8> = vec![
             self.sender.to_vec(),
             self.route.as_bytes().to_vec(),
-            vec![self.msgid],
+            vec![self.txid],
             self.payload.clone(),
         ]
         .into_iter()
@@ -188,7 +189,7 @@ impl CryptoHash for SignedTransaction {
     }
 }
 
-// Verify the signature for a signed transaction
+/// Verify the signature for a signed transaction
 pub fn verify_tx_signature(tx: &SignedTransaction, public_key: &PublicKey) -> bool {
     let hashed = tx.hash();
     match Signature::from_slice(&tx.signature[..]) {
@@ -197,7 +198,7 @@ pub fn verify_tx_signature(tx: &SignedTransaction, public_key: &PublicKey) -> bo
     }
 }
 
-// Sign a transaction
+/// Sign a transaction
 pub fn sign_transaction(tx: &mut SignedTransaction, private_key: &SecretKey) {
     tx.signature = exonum_crypto::sign(&tx.hash()[..], private_key)
         .as_ref()
