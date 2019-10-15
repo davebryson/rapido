@@ -18,7 +18,7 @@ pub trait Service: Sync + Send {
     /// The routing name of the service. This cooresponds to the route field in a SignedTransaction.
     /// Your service should return a route name that's unique across all services.  Internally the
     /// Rapido node stores services keyed by the route on a first come basis on creation.
-    fn route(&self) -> String;
+    fn route(&self) -> &'static str;
 
     /// Called on the initial start-up of the application. Can be used to establish
     /// initial state for your application.
@@ -39,7 +39,7 @@ pub trait Service: Sync + Send {
     /// for internal handlers. `path` below is extracted from the AbciQuery.path.
     /// Proper queries should be in the form: 'routename/path', where 'routename'
     /// is the name of the service, and 'path' is used to route to a specific application query.
-    fn query(&self, path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult;
+    fn query(&self, path: &str, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult;
 
     /// This function is called on ABCI commit to accumulate a new
     /// root hash across all services. You should return the current
@@ -163,15 +163,14 @@ pub struct SignedTransaction {
 
 impl SignedTransaction {
     /// Create a new SignedTransaction
-    pub fn new<R, M>(sender: AccountAddress, route: R, txid: u8, msg: M) -> Self
+    pub fn new<M>(sender: AccountAddress, route: &'static str, txid: u8, msg: M) -> Self
     where
-        R: Into<String>,
         M: BorshSerialize + BorshDeserialize + Transaction,
     {
         let payload = msg.try_to_vec().unwrap();
         Self {
             sender,
-            route: route.into(),
+            route: String::from(route),
             txid,
             payload,
             signature: Default::default(),

@@ -138,8 +138,8 @@ impl<T: ObjectAccess> SchemaStore<T> {
 // Service
 pub struct CryptocurrencyService;
 impl Service for CryptocurrencyService {
-    fn route(&self) -> String {
-        CRYPTO_SERVICE_ROUTE_NAME.into()
+    fn route(&self) -> &'static str {
+        CRYPTO_SERVICE_ROUTE_NAME
     }
 
     fn decode_tx(&self, txid: u8, payload: Vec<u8>) -> Result<Box<dyn Transaction>, Error> {
@@ -152,7 +152,7 @@ impl Service for CryptocurrencyService {
         }
     }
 
-    fn query(&self, _path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
+    fn query(&self, _path: &str, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
         let acct = AccountAddress::try_from(key);
         if acct.is_err() {
             return QueryResult::error(22);

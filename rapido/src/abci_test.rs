@@ -68,8 +68,8 @@ impl Transaction for SetCountMsg {
 // Service
 struct CounterService;
 impl Service for CounterService {
-    fn route(&self) -> String {
-        ROUTE_NAME.into()
+    fn route(&self) -> &'static str {
+        ROUTE_NAME
     }
 
     fn genesis(&self, fork: &Fork) -> TxResult {
@@ -89,7 +89,7 @@ impl Service for CounterService {
         Ok(Box::new(m))
     }
 
-    fn query(&self, path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
+    fn query(&self, path: &str, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
         if path == "/" {
             let schema = SchemaStore::new(snapshot);
             let acct = AccountAddress::try_from(key);
@@ -180,7 +180,6 @@ fn test_abci_works() {
     {
         let mut query = RequestQuery::new();
         query.path = format!("{}/", ROUTE_NAME);
-        //query.data = dave[..].to_vec();
         query.data = dave.to_vec();
         let qresp = app.query(&query);
         assert_eq!(0u32, qresp.code);
@@ -191,7 +190,6 @@ fn test_abci_works() {
         // Should fail
         let mut query = RequestQuery::new();
         query.path = "shouldfail".into();
-        //query.data = dave[..].to_vec();
         query.data = dave.to_vec();
         let qresp = app.query(&query);
         assert_eq!(103u32, qresp.code);
@@ -201,7 +199,6 @@ fn test_abci_works() {
         // Should fail
         let mut query = RequestQuery::new();
         query.path = "/".into();
-        //query.data = dave[..].to_vec();
         query.data = dave.to_vec();
         let qresp = app.query(&query);
         assert_eq!(103u32, qresp.code);
@@ -211,7 +208,6 @@ fn test_abci_works() {
         // Should fail
         let mut query = RequestQuery::new();
         query.path = "noserviceregistered/".into();
-        //query.data = dave[..].to_vec();
         query.data = dave.to_vec();
         let qresp = app.query(&query);
         assert_eq!(100u32, qresp.code);

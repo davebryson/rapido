@@ -82,7 +82,7 @@ pub const QUERYERR_NO_ROUTE: u32 = 103;
 pub struct Node {
     db: Arc<dyn Database>,
     app_state: AppState,
-    services: HashMap<String, Box<dyn Service>>,
+    services: HashMap<&'static str, Box<dyn Service>>,
     commit_patches: Vec<Patch>,
     validate_tx_handler: Option<ValidateTxHandler>,
 }
@@ -92,11 +92,12 @@ impl Node {
     pub fn new(config: AppBuilder) -> Self {
         let db = config.db;
 
-        let mut service_map: HashMap<String, Box<dyn Service>> = HashMap::new();
+        //let mut service_map: HashMap<String, Box<dyn Service>> = HashMap::new();
+        let mut service_map = HashMap::new();
         for s in config.services {
             let route = s.route();
             // First come, first serve...
-            if !service_map.contains_key(&route) {
+            if !service_map.contains_key(route) {
                 service_map.insert(route, s);
             }
         }
@@ -123,7 +124,7 @@ impl Node {
         };
 
         // Return err if there are no services matching the route
-        if !self.services.contains_key(&tx.route) {
+        if !self.services.contains_key(&*tx.route) {
             return TxResult::error(
                 SERVICE_NOT_FOUND,
                 format!("Service not found for route: {}", tx.route),
@@ -143,7 +144,7 @@ impl Node {
         let fork = self.db.fork();
         let result = match self
             .services
-            .get(&tx.route)
+            .get(&*tx.route)
             .and_then(|s| s.decode_tx(tx.txid, tx.payload.clone()).ok())
         {
             // Execute the STF
@@ -217,8 +218,8 @@ impl abci::Application for Node {
         };
 
         // Check if a service exists for this route
-        let route_as_string: &String = &route.into();
-        if !self.services.contains_key(route_as_string) {
+        //let route_as_string: &String = &route.into();
+        if !self.services.contains_key(route) {
             response.code = SERVICE_NOT_FOUND;
             response.log = format!("cannot find query service for {}", route);
             return response;
@@ -228,10 +229,10 @@ impl abci::Application for Node {
         let snapshot = self.db.snapshot();
         let result = self
             .services
-            .get(route_as_string)
+            .get(route)
             .unwrap() // <= we unwrap here, because we already checked for it above.
             // So, panic here if something else occurs
-            .query(query_path.into(), key, &snapshot);
+            .query(query_path, key, &snapshot);
 
         // Return the result
         response.code = result.code;

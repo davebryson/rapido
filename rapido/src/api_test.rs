@@ -32,8 +32,8 @@ impl Transaction for HelloMsgTwo {
 
 struct MyService;
 impl Service for MyService {
-    fn route(&self) -> String {
-        String::from("myservice")
+    fn route(&self) -> &'static str {
+        "myservice"
     }
 
     fn decode_tx(
@@ -57,7 +57,7 @@ impl Service for MyService {
         }
     }
 
-    fn query(&self, _path: String, _key: Vec<u8>, _snapshot: &Box<dyn Snapshot>) -> QueryResult {
+    fn query(&self, _path: &str, _key: Vec<u8>, _snapshot: &Box<dyn Snapshot>) -> QueryResult {
         QueryResult::ok(vec![])
     }
 
