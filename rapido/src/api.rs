@@ -8,34 +8,35 @@ use crate::account_address::AccountAddress;
 /// Function type for the abci checkTx handler.  This function should
 /// contain the logic to determine whether to accept or reject transactions
 /// from the Tendermint memory pool. Note: it only provides read-only
-/// access to storage.  So validation checks should be limited to checking signatures
+/// access to storage. Validation checks should be limited to
+/// checking signatures or other read-only operations.
 pub type ValidateTxHandler = fn(tx: &SignedTransaction, snapshot: &Box<dyn Snapshot>) -> TxResult;
 
-/// Implement this trait for your Service. Each service is
-/// keyed by the application by the 'route'. So you use a unique route name.
+/// Service is the starting point for your application. Each service may operate
+/// on 1 or transactions. Services are keyed internally by 'route'.
 pub trait Service: Sync + Send {
-    /// The routing name of the service. This cooresponds to the route field in a Tx.
+    /// The routing name of the service. This cooresponds to the route field in a SignedTransaction.
     fn route(&self) -> String;
 
     /// Called on first start-up of the application. Can be used to establish
-    /// initial state in your application.
+    /// initial state of your application.
     // TODO: Add validator info, and chain_id
     fn genesis(&self, _fork: &Fork) -> TxResult {
         TxResult::ok()
     }
 
-    /// Decode incoming transactions for the applications.  Each service may contain
-    /// 1 or more transactions the perform a state transistion. This should contain the
-    /// logic needed to select the application transaction to decode based on the
+    /// Decode incoming transactions for the application.  Each service may contain
+    /// 1 or more transactions that perform a state transistion. This function should
+    /// contain the logic to select the application transaction to decode based on the
     /// user-assigned 'txid'.
     fn decode_tx(&self, txid: u8, payload: Vec<u8>)
         -> Result<Box<dyn Transaction>, std::io::Error>;
 
     /// Main entry point for abci request queries. 'snapshot' provides
     /// read-only access to storage.  You can use path to do your own routing
-    /// for internal handlers. path below is extracted from the AbciQuery.path.
+    /// for internal handlers. `path` below is extracted from the AbciQuery.path.
     /// Proper queries should be in the form: 'routename/path', where 'routename'
-    /// is the name of the service, and 'path' is used within this method.
+    /// is the name of the service, and 'path' is used to route to a specific application query.
     fn query(&self, path: String, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult;
 
     /// This function is called on ABCI commit to accumulate a new
@@ -46,8 +47,8 @@ pub trait Service: Sync + Send {
     fn root_hash(&self, fork: &Fork) -> Hash;
 }
 
-/// TxResult is returned from Transactions & the validateTxHandler. They areautomatically
-/// converted to the associated ResponseCheck-DeliverTx message. Any non-zero code indicates an error.
+/// TxResult is returned from Transactions & the validateTxHandler and are automatically
+/// converted to the associated ResponseCheck/DeliverTx. Any non-zero code indicates an error.
 /// Applications are responsible for creating their own meaningful codes and messages (log).
 ///   
 /// Why not use a std::Result for this? In the future we need to add support for events to
@@ -105,8 +106,9 @@ impl Into<ResponseDeliverTx> for TxResult {
     }
 }
 
-/// Returned from a service query handler.  QueryResults will be
-/// converted to proper abci types internally.
+/// Returned from a service query handler to indicate success or failure.
+/// `QueryResult::ok(data)` is a successful query with the resulting `data`
+/// QueryResults will be converted to proper abci types internally.
 /// TODO: Expand to include proof.
 pub struct QueryResult {
     pub code: u32,
@@ -114,12 +116,13 @@ pub struct QueryResult {
 }
 
 impl QueryResult {
-    /// Ok: `value` is the result to return from running the query
+    /// Ok: `value` is the result to return from running the query. Since `value`
+    /// is a byte array, it's the responsibly of the caller (client) to decode it.
     pub fn ok(value: Vec<u8>) -> Self {
         Self { code: 0, value }
     }
 
-    /// Error: provide a code
+    /// Error: provide an application error code
     pub fn error(code: u32) -> Self {
         Self {
             code,
@@ -128,8 +131,9 @@ impl QueryResult {
     }
 }
 
-/// Main trait to implement for your application transactions.  `execute()` is ran
-/// during the abci 'deliver_tx' function.
+/// Transaction is the heart of your application logic. `execute()` is ran
+/// during the abci 'deliver_tx' function and should contain the state transition
+/// logic. Each Service may support 1 or more transactions.
 pub trait Transaction: Send + Sync {
     /// Execute the logic associated with this transaction. Implement your
     /// business logic here. `Fork` provides mutable access to the associated state store.
@@ -151,7 +155,7 @@ pub struct SignedTransaction {
     pub txid: u8,
     /// The encoded bits of the enclosed transaction
     pub payload: Vec<u8>,
-    /// Signature over the transaction
+    /// the signature over the transaction
     pub signature: Vec<u8>,
 }
 

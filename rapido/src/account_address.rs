@@ -10,7 +10,8 @@ pub const ACCT_ADDRESS_LENGTH: usize = 32;
 // Could make this generic for the app
 pub type AccountAddressResult = Result<AccountAddress, failure::Error>;
 
-/// AccountAddress is a container for unique account identifiers.
+/// AccountAddress is a container for unique account identifiers.  An AccountAddress
+/// can be anything you want as long as it fits into a 32 byte array.
 #[derive(BorshSerialize, BorshDeserialize, Ord, PartialOrd, Eq, PartialEq, Default, Clone, Copy)]
 pub struct AccountAddress([u8; ACCT_ADDRESS_LENGTH]);
 

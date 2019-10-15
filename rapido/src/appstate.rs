@@ -7,6 +7,8 @@ use std::{borrow::Cow, convert::AsRef};
 
 const APP_STATE_STORE: &str = "app_state_store";
 
+// App state provide blockchain application information.  It's used to determine
+// if a given node is in sync.  This information is not included in the overall app hash.
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
 pub struct AppState {
     pub version: i64,

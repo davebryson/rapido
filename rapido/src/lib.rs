@@ -29,7 +29,7 @@ use appstate::{AppState, AppStateSchema};
 const NAME: &str = "rapido_v1";
 const REQ_QUERY_PATH_SEPERATOR: &str = "/";
 
-/// Builder to assemble an application
+/// Use the AppBuilder to assemble an application
 pub struct AppBuilder {
     pub db: Arc<dyn Database>,
     pub services: Vec<Box<dyn Service>>,
@@ -146,6 +146,7 @@ impl Node {
             .get(&tx.route)
             .and_then(|s| s.decode_tx(tx.txid, tx.payload.clone()).ok())
         {
+            // Execute the STF
             Some(handler) => handler.execute(tx.sender, &fork),
             None => return TxResult::error(TXERR_DECODE_TX, "Err decoding transaction"),
         };
@@ -204,6 +205,7 @@ impl abci::Application for Node {
         let mut response = ResponseQuery::new();
         let key = req.data.clone();
 
+        // Parse the path.  See `parse_abci_query_path` for requirements
         let (route, query_path) = match parse_abci_query_path(&req.path) {
             Some(tuple) => tuple,
             None => {
@@ -222,7 +224,7 @@ impl abci::Application for Node {
             return response;
         }
 
-        // Call the service
+        // Call service.query
         let snapshot = self.db.snapshot();
         let result = self
             .services
@@ -256,7 +258,7 @@ impl abci::Application for Node {
     }
 
     fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
-        // Commit accumulated patches to storage and clear commit_patches vec.
+        // Commit accumulated patches from deliverTx to storage and clear commit_patches vec.
         for patch in self.commit_patches.drain(..) {
             self.db.merge(patch).expect("abci:commit patches");
         }
