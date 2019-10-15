@@ -16,10 +16,12 @@ pub type ValidateTxHandler = fn(tx: &SignedTransaction, snapshot: &Box<dyn Snaps
 /// on 1 or transactions. Services are keyed internally by 'route'.
 pub trait Service: Sync + Send {
     /// The routing name of the service. This cooresponds to the route field in a SignedTransaction.
+    /// Your service should return a route name that's unique across all services.  Internally the
+    /// Rapido node stores services keyed by the route on a first come basis on creation.
     fn route(&self) -> String;
 
-    /// Called on first start-up of the application. Can be used to establish
-    /// initial state of your application.
+    /// Called on the initial start-up of the application. Can be used to establish
+    /// initial state for your application.
     // TODO: Add validator info, and chain_id
     fn genesis(&self, _fork: &Fork) -> TxResult {
         TxResult::ok()
@@ -178,6 +180,7 @@ impl SignedTransaction {
 }
 
 impl CryptoHash for SignedTransaction {
+    // Hash the contents for signing
     fn hash(&self) -> Hash {
         // Hash order: sender, route, txid, payload
         let contents: Vec<u8> = vec![
