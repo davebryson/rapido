@@ -10,6 +10,7 @@ use exonum_merkledb::{Fork, Snapshot};
 /// checking signatures or other read-only operations.
 pub type ValidateTxHandler = fn(tx: &SignedTransaction, snapshot: &Box<dyn Snapshot>) -> TxResult;
 
+
 /// Service is the starting point for your application. Each service may operate
 /// on 1 or transactions. Services are keyed internally by 'route'.
 pub trait Service: Sync + Send {
