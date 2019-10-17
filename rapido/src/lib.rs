@@ -10,7 +10,6 @@ pub use self::api::{
     TxResult, ValidateTxHandler,
 };
 
-//mod account_address;
 mod api;
 mod appstate;
 
@@ -261,6 +260,7 @@ impl abci::Application for Node {
             self.db.merge(patch).expect("abci:commit patches");
         }
 
+        // Get another fork to commit app state
         let fork = self.db.fork();
 
         // Calculate new app hash from all services
@@ -280,6 +280,7 @@ impl abci::Application for Node {
         });
 
         // Merge new commits into to db
+        // panic here, to let us know if there's a problem.
         self.db
             .merge(fork.into_patch())
             .expect("abci:commit appstate");

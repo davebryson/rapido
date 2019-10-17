@@ -3,8 +3,6 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{CryptoHash, Hash, PublicKey, SecretKey, Signature};
 use exonum_merkledb::{Fork, Snapshot};
 
-//use crate::account_address::AccountAddress;
-
 /// Function type for the abci checkTx handler.  This function should
 /// contain the logic to determine whether to accept or reject transactions
 /// from the Tendermint memory pool. Note: it only provides read-only
@@ -139,7 +137,7 @@ impl QueryResult {
 pub trait Transaction: Send + Sync {
     /// Execute the logic associated with this transaction. Implement your
     /// business logic here. `Fork` provides mutable access to the associated state store.
-    /// AccountAddress is provided by the SignedTransaction used to transport this tx.
+    /// `sender` is provided by the SignedTransaction used to transport this tx.
     fn execute(&self, sender: Vec<u8>, fork: &Fork) -> TxResult;
 }
 
