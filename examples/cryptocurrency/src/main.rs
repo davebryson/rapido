@@ -7,7 +7,7 @@ use structopt::StructOpt;
 use cryptocurrency::{
     Account, CreateAcctTx, CryptocurrencyService, DepositTx, TransferTx, CRYPTO_SERVICE_ROUTE_NAME,
 };
-use rapido::{AccountAddress, SignedTransaction};
+use rapido::SignedTransaction;
 use rapido_client::RpcClient;
 
 const TMURL: &str = "http://127.0.0.1:26657";
@@ -37,12 +37,12 @@ pub enum Commands {
 }
 
 // Map accounts for ease of use
-fn get_account(name: &str) -> Option<AccountAddress> {
+fn get_account(name: &str) -> Option<Vec<u8>> {
     match name {
-        "dave" => Some(AccountAddress::new([1u8; 32])),
-        "bob" => Some(AccountAddress::new([2u8; 32])),
-        "alice" => Some(AccountAddress::new([3u8; 32])),
-        "tom" => Some(AccountAddress::new([3u8; 32])),
+        "dave" => Some(vec![1u8; 32]),
+        "bob" => Some(vec![2u8; 32]),
+        "alice" => Some(vec![3u8; 32]),
+        "tom" => Some(vec![3u8; 32]),
         _ => None,
     }
 }

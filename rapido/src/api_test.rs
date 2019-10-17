@@ -4,14 +4,14 @@ use exonum_merkledb::{Database, Fork, Snapshot, TemporaryDB};
 use std::sync::Arc;
 
 use super::{
-    sign_transaction, verify_tx_signature, AccountAddress, QueryResult, Service, SignedTransaction,
+    sign_transaction, verify_tx_signature, QueryResult, Service, SignedTransaction,
     Transaction, TxResult,
 };
 
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
 struct HelloMsgOne(u8);
 impl Transaction for HelloMsgOne {
-    fn execute(&self, _sender: AccountAddress, _fork: &Fork) -> TxResult {
+    fn execute(&self, _sender: Vec<u8>, _fork: &Fork) -> TxResult {
         if self.0 > 1 {
             return TxResult::error(1, "nope 1");
         }
@@ -22,7 +22,7 @@ impl Transaction for HelloMsgOne {
 #[derive(BorshSerialize, BorshDeserialize, PartialEq, Debug, Default)]
 struct HelloMsgTwo(u8);
 impl Transaction for HelloMsgTwo {
-    fn execute(&self, _sender: AccountAddress, _fork: &Fork) -> TxResult {
+    fn execute(&self, _sender: Vec<u8>, _fork: &Fork) -> TxResult {
         if self.0 > 2 {
             return TxResult::error(1, "nope 2");
         }
@@ -79,19 +79,19 @@ fn test_basic_service_flow() {
     let service = MyService {};
 
     let tx1 = service.decode_tx(0, enc_msg1).unwrap();
-    let result1 = tx1.execute(AccountAddress::new([1u8; 32]), &fork);
+    let result1 = tx1.execute(vec![1u8; 32], &fork);
     assert_eq!(0u32, result1.code);
 
     {
         let tx2 = service.decode_tx(1, enc_msg2.clone()).unwrap();
-        let result2 = tx2.execute(AccountAddress::new([2u8; 32]), &fork);
+        let result2 = tx2.execute(vec![2u8; 32], &fork);
         assert_eq!(0u32, result2.code);
     }
 
     {
         let tx2 = service.decode_tx(0, enc_msg2.clone()).unwrap();
         // Wrong msg id ============ ^
-        let result2 = tx2.execute(AccountAddress::new([2u8; 32]), &fork);
+        let result2 = tx2.execute(vec![2u8; 32], &fork);
         assert_eq!(1u32, result2.code);
     }
 }
@@ -101,11 +101,11 @@ fn test_with_signed_tx() {
     let (pk, sk) = gen_keypair();
     let msg = HelloMsgOne(1u8);
 
-    let mut signed = SignedTransaction::new(AccountAddress::new([1u8; 32]), "hello", 0, msg);
+    let mut signed = SignedTransaction::new(vec![1u8; 32], "hello", 0, msg);
     sign_transaction(&mut signed, &sk);
     assert!(verify_tx_signature(&signed, &pk));
 
-    assert_eq!(AccountAddress::new([1u8; 32]), signed.sender);
+    assert_eq!(vec![1u8; 32], signed.sender);
     assert_eq!(String::from("hello"), signed.route);
     assert_eq!(0, signed.txid);
 

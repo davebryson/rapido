@@ -4,12 +4,11 @@ use exonum_crypto::{gen_keypair, Hash, SecretKey};
 use exonum_merkledb::{
     Fork, ObjectAccess, ObjectHash, ProofMapIndex, RefMut, Snapshot, TemporaryDB,
 };
-use std::convert::TryFrom;
 use std::sync::Arc;
 
 use super::{
-    sign_transaction, AccountAddress, AppBuilder, Node, QueryResult, Service, SignedTransaction,
-    Transaction, TxResult,
+    sign_transaction, AppBuilder, Node, QueryResult, Service, SignedTransaction, Transaction,
+    TxResult,
 };
 
 /// Do a full test through abci framework:
@@ -26,22 +25,22 @@ impl<T: ObjectAccess> SchemaStore<T> {
         Self(object_access)
     }
 
-    pub fn add_account(&self, account: &AccountAddress) {
+    pub fn add_account(&self, account: &Vec<u8>) {
         self.store().put(&account, 0u8);
     }
 
-    pub fn store(&self) -> RefMut<ProofMapIndex<T, AccountAddress, u8>> {
+    pub fn store(&self) -> RefMut<ProofMapIndex<T, Vec<u8>, u8>> {
         self.0.get_object(ROUTE_NAME)
     }
 
-    pub fn get_current_count(&self, account: &AccountAddress) -> u8 {
+    pub fn get_current_count(&self, account: &Vec<u8>) -> u8 {
         match self.store().get(account) {
             Some(v) => v,
             None => 0u8,
         }
     }
 
-    pub fn set_next_count(&self, account: &AccountAddress, value: u8) {
+    pub fn set_next_count(&self, account: &Vec<u8>, value: u8) {
         self.store().put(account, value);
     }
 }
@@ -53,7 +52,7 @@ impl Transaction for SetCountMsg {
     // App logic:
     // Set the value in state. Rule: the 'value' must be the expected next number.
     // If not, error.
-    fn execute(&self, sender: AccountAddress, fork: &Fork) -> TxResult {
+    fn execute(&self, sender: Vec<u8>, fork: &Fork) -> TxResult {
         let schema = SchemaStore::new(fork);
         let current = schema.get_current_count(&sender);
         let expected_next_value = current + 1;
@@ -73,7 +72,7 @@ impl Service for CounterService {
     }
 
     fn genesis(&self, fork: &Fork) -> TxResult {
-        let dave = AccountAddress::new([1u8; 32]); // Genesis account
+        let dave = vec![1u8; 32]; // Genesis account
         let schema = SchemaStore::new(fork);
         schema.add_account(&dave);
         TxResult::ok()
@@ -92,11 +91,11 @@ impl Service for CounterService {
     fn query(&self, path: &str, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
         if path == "/" {
             let schema = SchemaStore::new(snapshot);
-            let acct = AccountAddress::try_from(key);
-            if acct.is_err() {
-                QueryResult::error(10);
-            }
-            let value = schema.get_current_count(&acct.unwrap());
+            let acct = key.clone();
+            //if acct.is_err() {
+            //    QueryResult::error(10);
+            // }
+            let value = schema.get_current_count(&acct);
             return QueryResult::ok(vec![value]);
         }
 
@@ -119,14 +118,14 @@ impl Service for CounterService {
 
 // CheckTx Handler
 fn my_validate_tx(tx: &SignedTransaction, _snapshot: &Box<dyn Snapshot>) -> TxResult {
-    if tx.sender != AccountAddress::new([1u8; 32]) {
+    if tx.sender != vec![1u8; 32] {
         return TxResult::error(1, "bad account amigo..");
     }
     TxResult::ok()
 }
 
 // Test helpers
-fn gen_and_sign_tx(acct: AccountAddress, sk: &SecretKey, msg: SetCountMsg) -> Vec<u8> {
+fn gen_and_sign_tx(acct: Vec<u8>, sk: &SecretKey, msg: SetCountMsg) -> Vec<u8> {
     let mut signed = SignedTransaction::new(acct, ROUTE_NAME, 0, msg);
     sign_transaction(&mut signed, &sk);
     let encoded = signed.try_to_vec();
@@ -159,28 +158,44 @@ fn test_abci_works() {
         .finish();
 
     let (_pk, sk) = gen_keypair();
-    let dave = AccountAddress::new([1u8; 32]); // test account add on genesis() in service
+    let dave = vec![1u8; 32]; // test account add on genesis() in service
 
-    assert_check_tx(&mut app, gen_and_sign_tx(dave, &sk, SetCountMsg(1)), 0u32);
+    assert_check_tx(
+        &mut app,
+        gen_and_sign_tx(dave.clone(), &sk, SetCountMsg(1)),
+        0u32,
+    );
     // Should fail (bad account)
     assert_check_tx(
         &mut app,
-        gen_and_sign_tx(AccountAddress::new([3u8; 32]), &sk, SetCountMsg(1)),
+        gen_and_sign_tx(vec![3u8; 32], &sk, SetCountMsg(1)),
         1u32,
     );
 
-    let root1 = assert_deliver_tx(&mut app, gen_and_sign_tx(dave, &sk, SetCountMsg(1)), 0u32);
-    let root2 = assert_deliver_tx(&mut app, gen_and_sign_tx(dave, &sk, SetCountMsg(1)), 1u32); // fail
+    let root1 = assert_deliver_tx(
+        &mut app,
+        gen_and_sign_tx(dave.clone(), &sk, SetCountMsg(1)),
+        0u32,
+    );
+    let root2 = assert_deliver_tx(
+        &mut app,
+        gen_and_sign_tx(dave.clone(), &sk, SetCountMsg(1)),
+        1u32,
+    ); // fail
     assert_eq!(root1, root2); // shouldn't change
 
-    let root3 = assert_deliver_tx(&mut app, gen_and_sign_tx(dave, &sk, SetCountMsg(2)), 0u32);
+    let root3 = assert_deliver_tx(
+        &mut app,
+        gen_and_sign_tx(dave.clone(), &sk, SetCountMsg(2)),
+        0u32,
+    );
     assert_ne!(root1, root3);
 
     // Check queries
     {
         let mut query = RequestQuery::new();
         query.path = format!("{}/", ROUTE_NAME);
-        query.data = dave.to_vec();
+        query.data = dave.clone();
         let qresp = app.query(&query);
         assert_eq!(0u32, qresp.code);
         assert_eq!(vec![2], qresp.value);

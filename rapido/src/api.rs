@@ -3,7 +3,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{CryptoHash, Hash, PublicKey, SecretKey, Signature};
 use exonum_merkledb::{Fork, Snapshot};
 
-use crate::account_address::AccountAddress;
+//use crate::account_address::AccountAddress;
 
 /// Function type for the abci checkTx handler.  This function should
 /// contain the logic to determine whether to accept or reject transactions
@@ -140,7 +140,7 @@ pub trait Transaction: Send + Sync {
     /// Execute the logic associated with this transaction. Implement your
     /// business logic here. `Fork` provides mutable access to the associated state store.
     /// AccountAddress is provided by the SignedTransaction used to transport this tx.
-    fn execute(&self, sender: AccountAddress, fork: &Fork) -> TxResult;
+    fn execute(&self, sender: Vec<u8>, fork: &Fork) -> TxResult;
 }
 
 /// SignedTransaction is used to transport transactions from the client to the your
@@ -149,7 +149,7 @@ pub trait Transaction: Send + Sync {
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct SignedTransaction {
     /// The sender/signer of the transaction
-    pub sender: AccountAddress,
+    pub sender: Vec<u8>,
     /// The unique route to the Service
     pub route: String,
     /// An ID to identify the transaction. This can be used to determine which Transaction
@@ -163,7 +163,7 @@ pub struct SignedTransaction {
 
 impl SignedTransaction {
     /// Create a new SignedTransaction
-    pub fn new<M>(sender: AccountAddress, route: &'static str, txid: u8, msg: M) -> Self
+    pub fn new<M>(sender: Vec<u8>, route: &'static str, txid: u8, msg: M) -> Self
     where
         M: BorshSerialize + BorshDeserialize + Transaction,
     {
@@ -190,7 +190,7 @@ impl CryptoHash for SignedTransaction {
     fn hash(&self) -> Hash {
         // Hash order: sender, route, txid, payload
         let contents: Vec<u8> = vec![
-            self.sender.to_vec(),
+            self.sender.clone(),
             self.route.as_bytes().to_vec(),
             vec![self.txid],
             self.payload.clone(),
