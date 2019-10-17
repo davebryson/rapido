@@ -295,7 +295,4 @@ impl abci::Application for Node {
 mod appstate_test;
 
 #[cfg(test)]
-mod api_test;
-
-#[cfg(test)]
 mod abci_test;

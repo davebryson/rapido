@@ -11,11 +11,6 @@ use super::{
     TxResult,
 };
 
-/// Do a full test through abci framework:
-/// Check Tx
-/// Deliver Tx
-/// Query
-/// Example:  Counter: Increment count object for user
 const ROUTE_NAME: &str = "counter_test";
 
 // Storage for the app
@@ -49,7 +44,6 @@ impl<T: ObjectAccess> SchemaStore<T> {
 #[derive(BorshSerialize, BorshDeserialize, Debug, Default)]
 struct SetCountMsg(u8);
 impl Transaction for SetCountMsg {
-    // App logic:
     // Set the value in state. Rule: the 'value' must be the expected next number.
     // If not, error.
     fn execute(&self, sender: Vec<u8>, fork: &Fork) -> TxResult {
@@ -89,25 +83,16 @@ impl Service for CounterService {
     }
 
     fn query(&self, path: &str, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
-        if path == "/" {
-            let schema = SchemaStore::new(snapshot);
-            let acct = key.clone();
-            //if acct.is_err() {
-            //    QueryResult::error(10);
-            // }
-            let value = schema.get_current_count(&acct);
-            return QueryResult::ok(vec![value]);
+        match path {
+            "/" => {
+                let schema = SchemaStore::new(snapshot);
+                let value = schema.get_current_count(&key);
+                QueryResult::ok(vec![value])
+            }
+            "/one" => QueryResult::ok(vec![0x1]),
+            "/two" => QueryResult::ok(vec![0x2]),
+            _ => QueryResult::error(10),
         }
-
-        if path == "/one" {
-            return QueryResult::ok(vec![0x1]);
-        }
-
-        if path == "/two" {
-            return QueryResult::ok(vec![0x2]);
-        }
-
-        QueryResult::error(10)
     }
 
     fn root_hash(&self, fork: &Fork) -> Hash {
