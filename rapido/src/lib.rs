@@ -15,12 +15,12 @@ mod appstate;
 
 use abci::*;
 use borsh::BorshDeserialize;
-use exonum_crypto::Hash;
+//use exonum_crypto::Hash;
 use exonum_merkledb::{BinaryValue, Database, Patch};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use appstate::{AppState, AppStateSchema};
+use appstate::{app_root_key, AppRootStoreSchema, AppState, AppStateSchema};
 
 const NAME: &str = "rapido_v1";
 const REQ_QUERY_PATH_SEPERATOR: &str = "/";
@@ -265,11 +265,26 @@ impl abci::Application for Node {
 
         // Calculate new app hash from all services
         // SEE ISSUE.txt
+        /*
         let mut hashes: Vec<Hash> = Vec::new();
         for (_, service) in &self.services {
             hashes.push(service.root_hash(&fork));
         }
         let state_root = exonum_merkledb::root_hash(&hashes);
+        */
+
+        // Collect all the store hashes from each service
+        // and add to the approot tree to calculate
+        // a single root for the app hash
+        let approot_db = AppRootStoreSchema::new(&fork);
+        for (name, service) in &self.services {
+            for (index, hash) in service.store_hashes(&fork).iter().enumerate() {
+                let key = app_root_key(name, index);
+                approot_db.store().put(&key, *hash);
+            }
+        }
+        let state_root = approot_db.get_root_hash();
+        println!("state hash: {:?}", state_root.to_hex());
 
         // Update and commit the app state
         let commit_schema = AppStateSchema::new(&fork);
@@ -281,7 +296,7 @@ impl abci::Application for Node {
         });
 
         // Merge new commits into to db
-        // panic here, to let us know if there's a problem.
+        // panic here, to let us know there's a problem.
         self.db
             .merge(fork.into_patch())
             .expect("abci:commit appstate");

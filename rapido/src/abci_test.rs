@@ -95,10 +95,15 @@ impl Service for CounterService {
         }
     }
 
-    fn root_hash(&self, fork: &Fork) -> Hash {
+    fn store_hashes(&self, fork: &Fork) -> Vec<Hash> {
+        let schema = SchemaStore::new(fork);
+        vec![schema.store().object_hash()]
+    }
+
+    /*fn root_hash(&self, fork: &Fork) -> Hash {
         let schema = SchemaStore::new(fork);
         schema.store().object_hash()
-    }
+    }*/
 }
 
 // CheckTx Handler

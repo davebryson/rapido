@@ -165,8 +165,13 @@ impl Service for CryptocurrencyService {
         QueryResult::error(1)
     }
 
-    fn root_hash(&self, fork: &Fork) -> Hash {
+    fn store_hashes(&self, fork: &Fork) -> Vec<Hash> {
+        let schema = SchemaStore::new(fork);
+        vec![schema.state().object_hash()]
+    }
+
+    /*fn root_hash(&self, fork: &Fork) -> Hash {
         let schema = SchemaStore::new(fork);
         schema.state().object_hash()
-    }
+    }*/
 }

@@ -45,7 +45,9 @@ pub trait Service: Sync + Send {
     /// of storage, you should return an accumulated hash of all your storage root hashes.
     /// The result of this function becomes the tendermint 'app hash'.
     /// Should return Vec<Hash>
-    fn root_hash(&self, fork: &Fork) -> Hash;
+    //fn root_hash(&self, fork: &Fork) -> Hash;
+
+    fn store_hashes(&self, fork: &Fork) -> Vec<Hash>;
 }
 
 /// TxResult is returned from Transactions & the validateTxHandler and are automatically
