@@ -10,7 +10,6 @@ use exonum_merkledb::{Fork, Snapshot};
 /// checking signatures or other read-only operations.
 pub type ValidateTxHandler = fn(tx: &SignedTransaction, snapshot: &Box<dyn Snapshot>) -> TxResult;
 
-
 /// Service is the starting point for your application. Each service may operate
 /// on 1 or transactions. Services are keyed internally by 'route'.
 pub trait Service: Sync + Send {
@@ -45,6 +44,7 @@ pub trait Service: Sync + Send {
     /// root hash from you state store(s).  If your app uses more than one form
     /// of storage, you should return an accumulated hash of all your storage root hashes.
     /// The result of this function becomes the tendermint 'app hash'.
+    /// Should return Vec<Hash>
     fn root_hash(&self, fork: &Fork) -> Hash;
 }
 

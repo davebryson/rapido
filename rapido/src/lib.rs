@@ -264,6 +264,7 @@ impl abci::Application for Node {
         let fork = self.db.fork();
 
         // Calculate new app hash from all services
+        // SEE ISSUE.txt
         let mut hashes: Vec<Hash> = Vec::new();
         for (_, service) in &self.services {
             hashes.push(service.root_hash(&fork));
