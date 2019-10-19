@@ -6,8 +6,8 @@ use exonum_merkledb::{
 };
 use std::{borrow::Cow, convert::AsRef};
 
-const APP_STATE_STORE: &str = "app_state_store";
-const APP_ROOT_STORE: &str = "_app_root_table_";
+const APP_STATE_STORE: &str = "_rapido_state_store_";
+const APP_ROOT_STORE: &str = "_rapido_root_table_";
 
 // App state provide blockchain application information.  It's used to determine
 // if a given node is in sync.  This information is not included in the overall app hash.

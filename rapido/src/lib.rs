@@ -213,6 +213,12 @@ impl abci::Application for Node {
             }
         };
 
+        // TODO: Add a fixed route here to query the apphash state
+        //  route =>  apphash/  query_path => serviceroute/index
+        //  let key = app_root_key(serviceroute, index)
+        //  let store_root_hash = approot_db.store().get(key)
+        //  response.value = store_root_hash.to_bytes().to_vec();
+
         // Check if a service exists for this route
         //let route_as_string: &String = &route.into();
         if !self.services.contains_key(route) {
@@ -284,7 +290,6 @@ impl abci::Application for Node {
             }
         }
         let state_root = approot_db.get_root_hash();
-        println!("state hash: {:?}", state_root.to_hex());
 
         // Update and commit the app state
         let commit_schema = AppStateSchema::new(&fork);
