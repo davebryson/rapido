@@ -20,10 +20,14 @@ use exonum_merkledb::{BinaryValue, Database, Patch};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use appstate::{app_root_key, AppRootStoreSchema, AppState, AppStateSchema};
+use appstate::{AppState, AppStateStore};
 
 const NAME: &str = "rapido_v1";
+
+// Queries expect this
 const REQ_QUERY_PATH_SEPERATOR: &str = "/";
+// Reserved Query to return a service hash from the proof table
+const RAPIDO_QUERY_ROUTE_APP_HASH: &str = "rapphash/";
 
 /// Use the AppBuilder to assemble an application
 pub struct AppBuilder {
@@ -72,6 +76,8 @@ pub const TXERR_SIGNED_TX: u32 = 101;
 pub const TXERR_DECODE_TX: u32 = 102;
 /// abci result code: No route found for the query
 pub const QUERYERR_NO_ROUTE: u32 = 103;
+// abci query code: No proof table found
+pub const QUERYERR_PROOF_TABLE: u32 = 104;
 
 /// Node provides functionality to execute services and manage storage.  
 /// You should use the `AppBuilder` to create a Node.
@@ -173,13 +179,13 @@ impl abci::Application for Node {
     // Check we're in sync, replay if not...
     fn info(&mut self, req: &RequestInfo) -> ResponseInfo {
         let snapshot = self.db.snapshot();
-        let schema = AppStateSchema::new(&snapshot);
-        self.app_state = schema.app_state().get().unwrap_or_default();
+        let store = AppStateStore::new(&snapshot);
+        self.app_state = store.get_commit_info().unwrap_or_default();
 
         let mut resp = ResponseInfo::new();
         resp.set_data(String::from(NAME));
         resp.set_version(String::from(req.get_version()));
-        resp.set_last_block_height(self.app_state.version);
+        resp.set_last_block_height(self.app_state.height);
         resp.set_last_block_app_hash(self.app_state.hash.clone());
         resp
     }
@@ -202,7 +208,7 @@ impl abci::Application for Node {
         let mut response = ResponseQuery::new();
         let key = req.data.clone();
 
-        // Parse the path.  See `parse_abci_query_path` for requirements
+        // Parse the path.  See `parse_abci_query_path` for the requirements
         let (route, query_path) = match parse_abci_query_path(&req.path) {
             Some(tuple) => tuple,
             None => {
@@ -213,17 +219,42 @@ impl abci::Application for Node {
             }
         };
 
-        // TODO: Add a fixed route here to query the apphash state
-        //  route =>  apphash/  query_path => serviceroute/index
-        //  let key = app_root_key(serviceroute, index)
-        //  let store_root_hash = approot_db.store().get(key)
-        //  response.value = store_root_hash.to_bytes().to_vec();
+        // Reserved Rapido Query:
+        // If the route == RAPIDO_QUERY_ROUTE_APP_HASH, then we query the proof table
+        // based on the key to return the last reported state hash for a service. `key`
+        // must be a borsh encoded `ProofTableKey`.  AbciQuery should be:
+        // path = RAPIDO_QUERY_ROUTE_APP_HASH
+        // data = Vec<u8> encoded as a `ProofTableKey`
+        //
+        // Services can specify their own queries to return a state hashes from their service.
+        //
+        // You can use this to prove that a specific service hash is as part of the
+        // overall apphash formed from the proof table.
+        if route == RAPIDO_QUERY_ROUTE_APP_HASH {
+            let snapshot = self.db.snapshot();
+            let store = AppStateStore::new(&snapshot);
+            match store.get_service_hash(key) {
+                Some(hash) => {
+                    response.code = 0;
+                    response.value = hash.to_bytes().to_vec();
+                    return response;
+                }
+                None => {
+                    response.code = QUERYERR_PROOF_TABLE;
+                    response.log = format!(
+                        "Cannot find a proof table state hash for {}. Maybe a bad ProofTableKey?",
+                        route
+                    );
+                    return response;
+                }
+            }
+        }
 
         // Check if a service exists for this route
         //let route_as_string: &String = &route.into();
         if !self.services.contains_key(route) {
             response.code = SERVICE_NOT_FOUND;
-            response.log = format!("cannot find query service for {}", route);
+            response.log = format!("Cannot find query service for {}", route);
             return response;
         }
 
@@ -261,44 +292,33 @@ impl abci::Application for Node {
     }
 
     fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
-        // Commit accumulated patches from deliverTx to storage and clear commit_patches vec.
+        // Commit accumulated patches from deliverTx to storage and
+        // clear commit_patches vec.
         for patch in self.commit_patches.drain(..) {
             self.db.merge(patch).expect("abci:commit patches");
         }
 
-        // Get another fork to commit app state
+        // Prepare to commit new app state
         let fork = self.db.fork();
 
-        // Calculate new app hash from all services
-        // SEE ISSUE.txt
-        /*
-        let mut hashes: Vec<Hash> = Vec::new();
-        for (_, service) in &self.services {
-            hashes.push(service.root_hash(&fork));
-        }
-        let state_root = exonum_merkledb::root_hash(&hashes);
-        */
-
-        // Collect all the store hashes from each service
-        // and add to the approot tree to calculate
-        // a single root for the app hash
-        let approot_db = AppRootStoreSchema::new(&fork);
-        for (name, service) in &self.services {
+        // Collect all the store hashes from each service and add to
+        // the appstore tree to calculate a single root for the apphash
+        let appstore = AppStateStore::new(&fork);
+        for (route, service) in &self.services {
             for (index, hash) in service.store_hashes(&fork).iter().enumerate() {
-                let key = app_root_key(name, index);
-                approot_db.store().put(&key, *hash);
+                appstore.save_service_hash(route, index, hash);
             }
         }
-        let state_root = approot_db.get_root_hash();
+        // New apphash (as bytes) calculated from the proof map
+        let state_root_bytes = appstore.get_proof_table_root_hash().to_bytes();
 
-        // Update and commit the app state
-        let commit_schema = AppStateSchema::new(&fork);
-        self.app_state.hash = state_root.to_bytes();
-        self.app_state.version = self.app_state.version + 1;
-        commit_schema.app_state().set(AppState {
-            version: self.app_state.version,
-            hash: self.app_state.hash.clone(),
-        });
+        // Update and commit the new appstate to the store
+        let new_height = self.app_state.height + 1;
+        appstore.set_commit_info(new_height, state_root_bytes.clone());
+
+        // Update application copy
+        self.app_state.hash = state_root_bytes;
+        self.app_state.height = new_height;
 
         // Merge new commits into to db
         // panic here, to let us know there's a problem.
@@ -311,9 +331,6 @@ impl abci::Application for Node {
         resp
     }
 }
-
-#[cfg(test)]
-mod appstate_test;
 
 #[cfg(test)]
 mod abci_test;
