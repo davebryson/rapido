@@ -1,3 +1,6 @@
+//! Example services used for testing:
+//! - Account:  Basic account support with 'coin' transfer
+//! - ProofOfDNA:  Register your DNA on the blockchain before it's stolen!
 pub mod accounts;
 pub mod proofodna;
 
@@ -7,7 +10,6 @@ use exonum_crypto::{gen_keypair, hash, PublicKey, SecretKey};
 /// Simple Wallet used for testing
 pub struct TestWallet {
     wallets: Vec<(Vec<u8>, u8, SecretKey, PublicKey)>,
-    num_wallets: usize,
 }
 
 impl TestWallet {
@@ -18,10 +20,7 @@ impl TestWallet {
             let address = hash(&pk[..]);
             w.push((address[..].to_vec(), 5, sk, pk))
         }
-        Self {
-            wallets: w,
-            num_wallets: num,
-        }
+        Self { wallets: w }
     }
 
     pub fn get(&self, index: usize) -> Option<&(Vec<u8>, u8, SecretKey, PublicKey)> {
@@ -34,10 +33,6 @@ impl TestWallet {
 
     pub fn get_secretkey(&self, index: usize) -> SecretKey {
         self.get(index).unwrap().2.clone()
-    }
-
-    pub fn get_publickey(&self, index: usize) -> PublicKey {
-        self.get(index).unwrap().3.clone()
     }
 
     pub fn generate_genesis_data(&self) -> Vec<u8> {

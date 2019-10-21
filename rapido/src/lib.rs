@@ -1,17 +1,21 @@
 //! Rapido is a Rust framework for building Tendermint applications via ABCI.
 //! It provides a high level API to assemble your application with:
-//! * flexible storage options via [Exonum MerkleDb](https://docs.rs/exonum-merkledb)
+//! * Flexible storage options via [Exonum MerkleDb](https://docs.rs/exonum-merkledb)
 //! * Elliptic curve crypto via [Exonum Crypto](https://docs.rs/exonum-crypto/)
-//! * deterministic message serialization via [Borsh](http://borsh.io/)
+//! * Deterministic message serialization via [Borsh](http://borsh.io/)
 //!
-
-pub use self::api::{
-    sign_transaction, verify_tx_signature, QueryResult, Service, SignedTransaction, Transaction,
-    TxResult, ValidateTxHandler,
+//! This framework is inspired by exonum and other rust based blockchain projects.
+pub use self::{
+    api::{
+        sign_transaction, verify_tx_signature, Service, SignedTransaction, Transaction,
+        ValidateTxHandler,
+    },
+    errors::RapidoError,
 };
 
 mod api;
 mod appstate;
+mod errors;
 
 use abci::*;
 use borsh::BorshDeserialize;
@@ -37,7 +41,7 @@ pub struct AppBuilder {
 }
 
 impl AppBuilder {
-    /// Create a new builder with the given Database handle
+    /// Create a new builder with the given Database handle from exonum_merkledb
     pub fn new(db: Arc<dyn Database>) -> Self {
         Self {
             db,
@@ -47,6 +51,8 @@ impl AppBuilder {
         }
     }
 
+    /// Set genesis data to be used on initial startup. How the data
+    /// is interpreted is left to the Service implementation
     pub fn set_genesis_data(mut self, data: Vec<u8>) -> Self {
         if data.len() > 0 {
             self.genesis_data = Some(data);
@@ -76,17 +82,6 @@ impl AppBuilder {
     }
 }
 
-/// abci result code: Service was not found
-pub const SERVICE_NOT_FOUND: u32 = 100;
-/// abci result code: Error decoding the signed transaction
-pub const TXERR_SIGNED_TX: u32 = 101;
-/// abci result code: Error decoding the application transaction/message
-pub const TXERR_DECODE_TX: u32 = 102;
-/// abci result code: No route found for the query
-pub const QUERYERR_NO_ROUTE: u32 = 103;
-// abci query code: No proof table found
-pub const QUERYERR_PROOF_TABLE: u32 = 104;
-
 /// Node provides functionality to execute services and manage storage.  
 /// You should use the `AppBuilder` to create a Node.
 pub struct Node {
@@ -103,7 +98,6 @@ impl Node {
     pub fn new(config: AppBuilder) -> Self {
         let db = config.db;
 
-        //let mut service_map: HashMap<String, Box<dyn Service>> = HashMap::new();
         let mut service_map = HashMap::new();
         for s in config.services {
             let route = s.route();
@@ -124,48 +118,40 @@ impl Node {
     }
 
     // internal function called by both check/deliver_tx
-    fn run_tx(&mut self, is_check: bool, raw_tx: Vec<u8>) -> TxResult {
-        let tx = match SignedTransaction::try_from_slice(&raw_tx[..]) {
-            Ok(tx) => tx,
-            Err(e) => {
-                return TxResult::error(
-                    TXERR_SIGNED_TX,
-                    format!("Err parsing SignedTransaction: {:?}", &e),
-                )
-            }
-        };
+    fn run_tx(&mut self, is_check: bool, raw_tx: Vec<u8>) -> Result<(), RapidoError> {
+        // Decode the incoming signed transaction
+        let tx = SignedTransaction::try_from_slice(&raw_tx[..])?;
 
         // Return err if there are no services matching the route
         if !self.services.contains_key(&*tx.route) {
-            return TxResult::error(
-                SERVICE_NOT_FOUND,
-                format!("Service not found for route: {}", tx.route),
-            );
+            return Err(RapidoError::from(format!(
+                "Service not found for route: {}",
+                tx.route
+            )));
         }
-
+        // If this is a check_tx and a validation handler has been
+        // set, run it
         if is_check {
             // NOTE:  checkTx has read-only to store
             let snapshot = self.db.snapshot();
             return match self.validate_tx_handler {
                 Some(handler) => handler(&tx, &snapshot),
-                None => TxResult::ok(),
+                None => Ok(()),
             };
         }
 
-        // Run DeliverTx
+        // Run DeliverTx by:
+        // - Getting the service based on the signed transaction 'route'
+        // - Decoding the message in the signed transaction
+        // - executing the associated Transaction
         let fork = self.db.fork();
-        let result = match self
-            .services
-            .get(&*tx.route)
-            .and_then(|s| s.decode_tx(tx.txid, tx.payload.clone()).ok())
-        {
-            // Execute the STF
-            Some(handler) => handler.execute(tx.sender, &fork),
-            None => return TxResult::error(TXERR_DECODE_TX, "Err decoding transaction"),
-        };
+        let service = self.services.get(&*tx.route).expect("should have service");
+        let result = service
+            .decode_tx(tx.txid, tx.payload.clone())
+            .and_then(|handler| handler.execute(tx.sender, &fork));
 
-        if result.code == 0 {
-            // We only save patches from successful transactions
+        // We only save patches from successful transactions
+        if result.is_ok() {
             self.commit_patches.push(fork.into_patch());
         }
         result
@@ -206,7 +192,7 @@ impl abci::Application for Node {
             // a little clunky, but only done once
             let fork = self.db.fork();
             let result = service.genesis(&fork, self.genesis_data.as_ref());
-            if result.code == 0 {
+            if result.is_ok() {
                 // We only save patches from successful transactions
                 self.commit_patches.push(fork.into_patch());
             }
@@ -222,7 +208,7 @@ impl abci::Application for Node {
         let (route, query_path) = match parse_abci_query_path(&req.path) {
             Some(tuple) => tuple,
             None => {
-                response.code = QUERYERR_NO_ROUTE;
+                response.code = 1u32;
                 response.key = req.data.clone();
                 response.log = "No query path found.  Format should be 'route/apppath'".into();
                 return response;
@@ -250,7 +236,7 @@ impl abci::Application for Node {
                     return response;
                 }
                 None => {
-                    response.code = QUERYERR_PROOF_TABLE;
+                    response.code = 1u32;
                     response.log = format!(
                         "Cannot find a proof table state hash for {}. Maybe a bad ProofTableKey?",
                         route
@@ -261,35 +247,64 @@ impl abci::Application for Node {
         }
 
         // Check if a service exists for this route
-        //let route_as_string: &String = &route.into();
         if !self.services.contains_key(route) {
-            response.code = SERVICE_NOT_FOUND;
+            response.code = 1u32;
             response.log = format!("Cannot find query service for {}", route);
             return response;
         }
 
         // Call service.query
         let snapshot = self.db.snapshot();
-        let result = self
+        match self
             .services
             .get(route)
             .unwrap() // <= we unwrap here, because we already checked for it above.
             // So, panic here if something else occurs
-            .query(query_path, key, &snapshot);
-
-        // Return the result
-        response.code = result.code;
-        response.value = result.value;
-        response.key = req.data.clone();
-        response
+            .query(query_path, key, &snapshot)
+        {
+            Ok(value) => {
+                response.code = 0;
+                response.value = value;
+                response.key = req.data.clone();
+                response
+            }
+            Err(msg) => {
+                response.code = 1u32;
+                response.key = req.data.clone();
+                response.set_log(msg.to_string());
+                response
+            }
+        }
     }
 
     fn check_tx(&mut self, req: &RequestCheckTx) -> ResponseCheckTx {
-        self.run_tx(true, req.tx.clone()).into()
+        let mut resp = ResponseCheckTx::new();
+        match self.run_tx(true, req.tx.clone()) {
+            Ok(_) => {
+                resp.set_code(0);
+                resp
+            }
+            Err(msg) => {
+                resp.set_code(1u32);
+                resp.set_log(msg.to_string());
+                resp
+            }
+        }
     }
 
     fn deliver_tx(&mut self, req: &RequestDeliverTx) -> ResponseDeliverTx {
-        self.run_tx(false, req.tx.clone()).into()
+        let mut resp = ResponseDeliverTx::new();
+        match self.run_tx(false, req.tx.clone()) {
+            Ok(_) => {
+                resp.set_code(0);
+                resp
+            }
+            Err(msg) => {
+                resp.set_code(1u32);
+                resp.set_log(msg.to_string());
+                resp
+            }
+        }
     }
 
     fn begin_block(&mut self, _req: &RequestBeginBlock) -> ResponseBeginBlock {
@@ -341,6 +356,3 @@ impl abci::Application for Node {
         resp
     }
 }
-
-#[cfg(test)]
-mod abci_test;

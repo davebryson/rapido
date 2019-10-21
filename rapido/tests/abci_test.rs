@@ -6,9 +6,8 @@ use exonum_merkledb::{
 };
 use std::sync::Arc;
 
-use super::{
-    sign_transaction, AppBuilder, Node, QueryResult, Service, SignedTransaction, Transaction,
-    TxResult,
+use rapido::{
+    sign_transaction, AppBuilder, Node, RapidoError, Service, SignedTransaction, Transaction,
 };
 
 const ROUTE_NAME: &str = "counter_test";
@@ -46,15 +45,15 @@ struct SetCountMsg(u8);
 impl Transaction for SetCountMsg {
     // Set the value in state. Rule: the 'value' must be the expected next number.
     // If not, error.
-    fn execute(&self, sender: Vec<u8>, fork: &Fork) -> TxResult {
+    fn execute(&self, sender: Vec<u8>, fork: &Fork) -> Result<(), RapidoError> {
         let schema = SchemaStore::new(fork);
         let current = schema.get_current_count(&sender);
         let expected_next_value = current + 1;
         if self.0 != expected_next_value {
-            return TxResult::error(1, format!("msg value <= current state"));
+            return Err(RapidoError::from("msg value <= current state"));
         }
         schema.set_next_count(&sender, expected_next_value);
-        TxResult::ok()
+        Ok(())
     }
 }
 
@@ -65,33 +64,34 @@ impl Service for CounterService {
         ROUTE_NAME
     }
 
-    fn genesis(&self, fork: &Fork, _data: Option<&Vec<u8>>) -> TxResult {
+    fn genesis(&self, fork: &Fork, _data: Option<&Vec<u8>>) -> Result<(), RapidoError> {
         let dave = vec![1u8; 32]; // Genesis account
         let schema = SchemaStore::new(fork);
         schema.add_account(&dave);
-        TxResult::ok()
+        Ok(())
     }
 
-    fn decode_tx(
-        &self,
-        _txid: u8,
-        payload: Vec<u8>,
-    ) -> Result<Box<dyn Transaction>, std::io::Error> {
+    fn decode_tx(&self, _txid: u8, payload: Vec<u8>) -> Result<Box<dyn Transaction>, RapidoError> {
         // We don't check for txid
         let m = SetCountMsg::try_from_slice(&payload[..])?;
         Ok(Box::new(m))
     }
 
-    fn query(&self, path: &str, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
+    fn query(
+        &self,
+        path: &str,
+        key: Vec<u8>,
+        snapshot: &Box<dyn Snapshot>,
+    ) -> Result<Vec<u8>, RapidoError> {
         match path {
             "/" => {
                 let schema = SchemaStore::new(snapshot);
                 let value = schema.get_current_count(&key);
-                QueryResult::ok(vec![value])
+                Ok(vec![value])
             }
-            "/one" => QueryResult::ok(vec![0x1]),
-            "/two" => QueryResult::ok(vec![0x2]),
-            _ => QueryResult::error(10),
+            "/one" => Ok(vec![0x1]),
+            "/two" => Ok(vec![0x2]),
+            _ => Err(RapidoError::from("No query path found")),
         }
     }
 
@@ -102,11 +102,14 @@ impl Service for CounterService {
 }
 
 // CheckTx Handler
-fn my_validate_tx(tx: &SignedTransaction, _snapshot: &Box<dyn Snapshot>) -> TxResult {
+fn my_validate_tx(
+    tx: &SignedTransaction,
+    _snapshot: &Box<dyn Snapshot>,
+) -> Result<(), RapidoError> {
     if tx.sender != vec![1u8; 32] {
-        return TxResult::error(1, "bad account amigo..");
+        return Err(RapidoError::from("bad account amigo.."));
     }
-    TxResult::ok()
+    Ok(())
 }
 
 // Test helpers
@@ -145,11 +148,15 @@ fn test_abci_works() {
     let (_pk, sk) = gen_keypair();
     let dave = vec![1u8; 32]; // test account add on genesis() in service
 
+    // Fail on malformed signed Tx
+    assert_check_tx(&mut app, vec![], 1u32);
+
     assert_check_tx(
         &mut app,
         gen_and_sign_tx(dave.clone(), &sk, SetCountMsg(1)),
         0u32,
     );
+
     // Should fail (bad account)
     assert_check_tx(
         &mut app,
@@ -162,11 +169,13 @@ fn test_abci_works() {
         gen_and_sign_tx(dave.clone(), &sk, SetCountMsg(1)),
         0u32,
     );
+
     let root2 = assert_deliver_tx(
         &mut app,
         gen_and_sign_tx(dave.clone(), &sk, SetCountMsg(1)),
         1u32,
     ); // fail
+
     assert_eq!(root1, root2); // shouldn't change
 
     let root3 = assert_deliver_tx(
@@ -192,7 +201,7 @@ fn test_abci_works() {
         query.path = "shouldfail".into();
         query.data = dave.to_vec();
         let qresp = app.query(&query);
-        assert_eq!(103u32, qresp.code);
+        assert_eq!(1u32, qresp.code);
     }
 
     {
@@ -201,7 +210,7 @@ fn test_abci_works() {
         query.path = "/".into();
         query.data = dave.to_vec();
         let qresp = app.query(&query);
-        assert_eq!(103u32, qresp.code);
+        assert_eq!(1u32, qresp.code);
     }
 
     {
@@ -210,7 +219,7 @@ fn test_abci_works() {
         query.path = "noserviceregistered/".into();
         query.data = dave.to_vec();
         let qresp = app.query(&query);
-        assert_eq!(100u32, qresp.code);
+        assert_eq!(1u32, qresp.code);
     }
 
     {

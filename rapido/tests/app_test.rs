@@ -52,7 +52,7 @@ fn test_check_tx() {
 
         let mut req = RequestCheckTx::new();
         req.set_tx(bits.clone());
-        assert_eq!(10u32, node.check_tx(&req).code);
+        assert_eq!(1u32, node.check_tx(&req).code);
     }
 
     {
@@ -72,7 +72,7 @@ fn test_check_tx() {
 
         let mut req = RequestCheckTx::new();
         req.set_tx(bits.clone());
-        assert_eq!(10u32, node.check_tx(&req).code);
+        assert_eq!(1u32, node.check_tx(&req).code);
     }
 
     {

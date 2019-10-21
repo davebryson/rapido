@@ -1,14 +1,16 @@
-use abci::{ResponseCheckTx, ResponseDeliverTx};
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{CryptoHash, Hash, PublicKey, SecretKey, Signature};
 use exonum_merkledb::{Fork, Snapshot};
+
+use crate::errors::RapidoError;
 
 /// Function type for the abci checkTx handler.  This function should
 /// contain the logic to determine whether to accept or reject transactions
 /// from the Tendermint memory pool. Note: it only provides read-only
 /// access to storage. Validation checks should be limited to
 /// checking signatures or other read-only operations.
-pub type ValidateTxHandler = fn(tx: &SignedTransaction, snapshot: &Box<dyn Snapshot>) -> TxResult;
+pub type ValidateTxHandler =
+    fn(tx: &SignedTransaction, snapshot: &Box<dyn Snapshot>) -> Result<(), RapidoError>;
 
 /// Service is the starting point for your application. Each service may operate
 /// on 1 or transactions. Services are keyed internally by 'route'.
@@ -22,23 +24,27 @@ pub trait Service: Sync + Send {
     /// initial state for your application. Provides a borrowed view of genesis data
     /// for each application to process as needed.
     // TODO: Add validator info, and chain_id
-    fn genesis(&self, _fork: &Fork, _data: Option<&Vec<u8>>) -> TxResult {
-        TxResult::ok()
+    fn genesis(&self, _fork: &Fork, _data: Option<&Vec<u8>>) -> Result<(), RapidoError> {
+        Ok(())
     }
 
     /// Decode incoming transactions for the application.  Each service may contain
     /// 1 or more transactions that perform a state transistion. This function should
     /// contain the logic to select the application transaction to decode based on the
     /// user-assigned 'txid'.
-    fn decode_tx(&self, txid: u8, payload: Vec<u8>)
-        -> Result<Box<dyn Transaction>, std::io::Error>;
+    fn decode_tx(&self, txid: u8, payload: Vec<u8>) -> Result<Box<dyn Transaction>, RapidoError>;
 
     /// Main entry point for abci request queries. 'snapshot' provides
     /// read-only access to storage.  You can use path to do your own routing
     /// for internal handlers. `path` below is extracted from the AbciQuery.path.
     /// Proper queries should be in the form: 'routename/path', where 'routename'
     /// is the name of the service, and 'path' is used to route to a specific application query.
-    fn query(&self, path: &str, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult;
+    fn query(
+        &self,
+        path: &str,
+        key: Vec<u8>,
+        snapshot: &Box<dyn Snapshot>,
+    ) -> Result<Vec<u8>, RapidoError>;
 
     /// This function is called on ABCI commit to accumulate a new
     /// root hash across all services. You should return the current
@@ -46,112 +52,7 @@ pub trait Service: Sync + Send {
     /// of storage, you should return an accumulated hash of all your storage root hashes.
     /// The result of this function becomes the tendermint 'app hash'.
     /// Should return Vec<Hash>
-    //fn root_hash(&self, fork: &Fork) -> Hash;
-
     fn store_hashes(&self, fork: &Fork) -> Vec<Hash>;
-}
-
-/// TxResult is returned from Transactions & the validateTxHandler and are automatically
-/// converted to the associated ResponseCheck/DeliverTx. Any non-zero code indicates an error.
-/// Applications are responsible for creating their own meaningful codes and messages (log).
-///   
-/// Why not use a std::Result for this? In the future we need to add support for events to
-/// this structure.
-pub struct TxResult {
-    pub code: u32,
-    pub log: String,
-}
-
-impl TxResult {
-    /// Construct a new code and log/message
-    pub fn new<T: Into<String>>(code: u32, log: T) -> Self {
-        Self {
-            code,
-            log: log.into(),
-        }
-    }
-
-    /// Returns a 0 (ok) code with and empty log message
-    pub fn ok() -> Self {
-        Self {
-            code: 0,
-            log: "".to_string(),
-        }
-    }
-
-    /// Returns and error code with the reason
-    pub fn error<T: Into<String>>(code: u32, reason: T) -> Self {
-        Self {
-            code,
-            log: reason.into(),
-        }
-    }
-}
-
-/// Translate a failure::Error in to TxResult::error()
-impl From<failure::Error> for TxResult {
-    fn from(error: failure::Error) -> Self {
-        TxResult::error(1001, format!("{:}", error))
-    }
-}
-
-// Convert a TxResult into a abci.checkTx response
-#[doc(hidden)]
-impl Into<ResponseCheckTx> for TxResult {
-    fn into(self) -> ResponseCheckTx {
-        let mut resp = ResponseCheckTx::new();
-        resp.set_code(self.code);
-        resp.set_log(self.log);
-        resp
-    }
-}
-
-// Convert a TxResult into a abci.deliverTx response
-#[doc(hidden)]
-impl Into<ResponseDeliverTx> for TxResult {
-    fn into(self) -> ResponseDeliverTx {
-        let mut resp = ResponseDeliverTx::new();
-        resp.set_code(self.code);
-        resp.set_log(self.log);
-        resp
-    }
-}
-
-/// Returned from a service query handler to indicate success or failure.
-/// `QueryResult::ok(data)` is a successful query with the resulting `data`
-/// QueryResults will be converted to proper abci types internally.
-/// TODO: Expand to include proof.
-pub struct QueryResult {
-    pub code: u32,
-    pub value: Vec<u8>,
-    pub log: String,
-}
-
-impl QueryResult {
-    pub fn new<L: Into<String>>(code: u32, value: Vec<u8>, log: L) -> Self {
-        Self {
-            code,
-            value,
-            log: log.into(),
-        }
-    }
-    /// Ok: `value` is the result to return from running the query. Since `value`
-    /// is a byte array, it's the responsibly of the caller (client) to decode it.
-    pub fn ok(value: Vec<u8>) -> Self {
-        Self::new(0, value, "")
-    }
-
-    /// Error: provide an application error code
-    pub fn error(code: u32) -> Self {
-        Self::new(code, vec![], "")
-    }
-}
-
-/// Translate a failure::Error in to QueryResult::error()
-impl From<failure::Error> for QueryResult {
-    fn from(error: failure::Error) -> Self {
-        QueryResult::new(1002, vec![], format!("{:}", error))
-    }
 }
 
 /// Transaction is the heart of your application logic. `execute()` is ran
@@ -161,12 +62,11 @@ pub trait Transaction: Send + Sync {
     /// Execute the logic associated with this transaction. Implement your
     /// business logic here. `Fork` provides mutable access to the associated state store.
     /// `sender` is provided by the SignedTransaction used to transport this tx.
-    fn execute(&self, sender: Vec<u8>, fork: &Fork) -> TxResult;
+    fn execute(&self, sender: Vec<u8>, fork: &Fork) -> Result<(), RapidoError>;
 }
 
 /// SignedTransaction is used to transport transactions from the client to the your
 /// application. It provides a wrapper around application specific transactions.
-/// Note: This will evolve to provide more flexibilty in the future...
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct SignedTransaction {
     /// The sender/signer of the transaction

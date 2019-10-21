@@ -9,13 +9,8 @@ use exonum_merkledb::{
     impl_object_hash_for_binary_value, BinaryValue, Fork, ObjectAccess, ObjectHash, ProofMapIndex,
     RefMut, Snapshot,
 };
-use failure::ensure;
-use rapido::{verify_tx_signature, QueryResult, Service, SignedTransaction, Transaction, TxResult};
-use std::{
-    borrow::Cow,
-    convert::AsRef,
-    io::{Error, ErrorKind},
-};
+use rapido::{verify_tx_signature, RapidoError, Service, SignedTransaction, Transaction};
+use std::{borrow::Cow, convert::AsRef, io::Error};
 
 pub const ACCOUNT_SERVICE_ROUTE: &str = "accounts_service";
 
@@ -46,14 +41,17 @@ impl GenesisAccounts {
 }
 
 /// Authentication handler used for check_tx
-pub fn authenticate_sender(tx: &SignedTransaction, snapshot: &Box<dyn Snapshot>) -> TxResult {
+pub fn authenticate_sender(
+    tx: &SignedTransaction,
+    snapshot: &Box<dyn Snapshot>,
+) -> Result<(), RapidoError> {
     let store = AccountStore::new(snapshot);
     match store
         .fetch(&tx.sender.clone())
         .filter(|acct| verify_tx_signature(tx, &acct.get_public_key()))
     {
-        Some(_) => TxResult::ok(),
-        None => TxResult::error(10, "Account not found or bad signature"),
+        Some(_) => Ok(()),
+        None => Err(RapidoError::from("Account not found or bad signature")),
     }
 }
 
@@ -133,17 +131,15 @@ impl<T: ObjectAccess> AccountStore<T> {
         self.accounts().get(id)
     }
 
-    pub fn transfer(
-        &self,
-        sender: Vec<u8>,
-        recip: Vec<u8>,
-        amount: u8,
-    ) -> Result<(), failure::Error> {
+    pub fn transfer(&self, sender: Vec<u8>, recip: Vec<u8>, amount: u8) -> Result<(), RapidoError> {
         let from_account = self.fetch(&sender);
+        if from_account.is_none() {
+            return Err(RapidoError::from("sender account not found"));
+        }
         let to_account = self.fetch(&recip);
-
-        ensure!(from_account.is_some(), "sender account not found");
-        ensure!(to_account.is_some(), "recipient account not found");
+        if to_account.is_none() {
+            return Err(RapidoError::from("recipient account not found"));
+        }
         let mut fa = from_account.unwrap();
         let mut ta = to_account.unwrap();
 
@@ -163,38 +159,38 @@ impl Service for AccountService {
         ACCOUNT_SERVICE_ROUTE
     }
 
-    fn genesis(&self, fork: &Fork, data: Option<&Vec<u8>>) -> TxResult {
-        match data.and_then(|raw| GenesisAccounts::decode(raw).ok()) {
-            Some(ga) => {
-                let store = AccountStore::new(fork);
-                for (id, bal, pk) in &ga.accounts {
-                    store.create(id.clone(), *bal, *pk);
-                }
-            }
-            None => return TxResult::error(1, "problem extracting genesis accounts"),
+    fn genesis(&self, fork: &Fork, data: Option<&Vec<u8>>) -> Result<(), RapidoError> {
+        if data.is_none() {
+            return Err(RapidoError::from("Expected genesis data"));
         }
-        TxResult::ok()
+        let raw = data.unwrap();
+        let ga = GenesisAccounts::decode(raw)?;
+        let store = AccountStore::new(fork);
+        for (id, bal, pk) in &ga.accounts {
+            store.create(id.clone(), *bal, *pk);
+        }
+        Ok(())
     }
 
-    fn decode_tx(
-        &self,
-        _txid: u8,
-        _payload: Vec<u8>,
-    ) -> Result<Box<dyn Transaction>, std::io::Error> {
+    fn decode_tx(&self, _txid: u8, _payload: Vec<u8>) -> Result<Box<dyn Transaction>, RapidoError> {
         // We don't process any message right now
-        Err(Error::new(ErrorKind::Other, "not implemented!"))
+        Err(RapidoError::from("Not implemented"))
     }
 
-    fn query(&self, path: &str, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
-        if path == "/account" {
-            let store = AccountStore::new(snapshot);
-            return match store.fetch(&key) {
-                Some(acct) => QueryResult::ok(acct.encode()),
-                None => QueryResult::error(2),
-            };
+    fn query(
+        &self,
+        path: &str,
+        key: Vec<u8>,
+        snapshot: &Box<dyn Snapshot>,
+    ) -> Result<Vec<u8>, RapidoError> {
+        if path != "/account" {
+            return Err(RapidoError::from("Only handle account queries"));
         }
-
-        QueryResult::error(2)
+        let store = AccountStore::new(snapshot);
+        match store.fetch(&key) {
+            Some(acct) => Ok(acct.encode()),
+            None => Err(RapidoError::from("Account not found")),
+        }
     }
 
     fn store_hashes(&self, fork: &Fork) -> Vec<Hash> {

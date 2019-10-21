@@ -1,12 +1,13 @@
+//! Proof of DNA Service.  Register your DNA to prove it's you!
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::Hash;
 use exonum_merkledb::{Fork, ObjectAccess, ObjectHash, ProofMapIndex, RefMut, Snapshot};
-use rapido::{QueryResult, Service, Transaction, TxResult};
+use rapido::{RapidoError, Service, Transaction};
 
 use super::accounts::AccountStore;
 
 pub const PODNA_SERVICE_ROUTE: &str = "proof_of_dna_service";
-const REGISTRATION_COST: u8 = 5;
+const REGISTRATION_COST: u8 = 5; // The cost to register
 
 // Storage
 pub struct DNAStore<T: ObjectAccess>(T);
@@ -23,9 +24,9 @@ impl<T: ObjectAccess> DNAStore<T> {
         self.0.get_object("_podna_d_to_a_store_")
     }
 
-    pub fn register_dna(&self, acct: Vec<u8>, dna: Hash) -> Result<(), failure::Error> {
+    pub fn register_dna(&self, acct: Vec<u8>, dna: Hash) -> Result<(), RapidoError> {
         if let Some(_) = self.dna_to_acct().get(&dna) {
-            return Err(failure::err_msg("DNA already registered!"));
+            return Err(RapidoError::from("DNA already registered!"));
         }
         self.acct_to_dna().put(&acct, dna);
         self.dna_to_acct().put(&dna, acct);
@@ -39,24 +40,25 @@ impl Service for DNAService {
         PODNA_SERVICE_ROUTE
     }
 
-    fn decode_tx(
-        &self,
-        _txid: u8,
-        payload: Vec<u8>,
-    ) -> Result<Box<dyn Transaction>, std::io::Error> {
+    fn decode_tx(&self, _txid: u8, payload: Vec<u8>) -> Result<Box<dyn Transaction>, RapidoError> {
         let msg = RegisterTx::try_from_slice(&payload[..])?;
         Ok(Box::new(msg))
     }
 
-    fn query(&self, path: &str, key: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> QueryResult {
-        if path == "/dna" {
-            let store = DNAStore::new(snapshot);
-            return match store.acct_to_dna().get(&key) {
-                Some(value) => QueryResult::ok(value[..].to_vec()),
-                None => QueryResult::error(22),
-            };
+    fn query(
+        &self,
+        path: &str,
+        key: Vec<u8>,
+        snapshot: &Box<dyn Snapshot>,
+    ) -> Result<Vec<u8>, RapidoError> {
+        if path != "/dna" {
+            return Err(RapidoError::from("bad path for query"));
         }
-        QueryResult::new(23, vec![], "Unrecognized query path")
+        let store = DNAStore::new(snapshot);
+        match store.acct_to_dna().get(&key) {
+            Some(value) => Ok(value[..].to_vec()),
+            None => Err(RapidoError::from("Account not found")),
+        }
     }
 
     fn store_hashes(&self, fork: &Fork) -> Vec<Hash> {
@@ -77,20 +79,16 @@ impl RegisterTx {
 }
 
 impl Transaction for RegisterTx {
-    fn execute(&self, sender: Vec<u8>, fork: &Fork) -> TxResult {
+    fn execute(&self, sender: Vec<u8>, fork: &Fork) -> Result<(), RapidoError> {
         let store = DNAStore::new(fork);
         let accounts = AccountStore::new(fork);
 
-        if let Some(acct) = accounts.fetch(&sender) {
-            return match store
-                .register_dna(acct.id, Hash::new(self.1))
-                .and_then(|_| accounts.transfer(sender, self.0.clone(), REGISTRATION_COST))
-            {
-                Ok(_) => TxResult::ok(),
-                Err(m) => m.into(),
-            };
+        if let None = accounts.fetch(&sender) {
+            return Err(RapidoError::from("No account found"));
         }
-
-        TxResult::ok()
+        let acct = accounts.fetch(&sender).unwrap();
+        store
+            .register_dna(acct.id, Hash::new(self.1))
+            .and_then(|_| accounts.transfer(sender, self.0.clone(), REGISTRATION_COST))
     }
 }
