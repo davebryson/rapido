@@ -48,7 +48,8 @@ impl ProofTableKey {
             .map_err(|_| failure::err_msg("proof table key encoding:"))
     }
 
-    /// Decode a vec into a proof table key
+    /// Decode a vec into a proof table key. For testing
+    #[cfg(test)]
     pub fn decode(raw: Vec<u8>) -> Result<Self, failure::Error> {
         Self::try_from_slice(&raw[..]).map_err(|_| failure::err_msg("proof table key decoding:"))
     }
@@ -119,7 +120,6 @@ impl<T: ObjectAccess> AppStateStore<T> {
     pub fn get_service_hash(&self, key: Vec<u8>) -> Option<Hash> {
         self.proof_table().get(&key)
     }
-    
 }
 
 #[cfg(test)]

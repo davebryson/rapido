@@ -19,9 +19,10 @@ pub trait Service: Sync + Send {
     fn route(&self) -> &'static str;
 
     /// Called on the initial start-up of the application. Can be used to establish
-    /// initial state for your application.
+    /// initial state for your application. Provides a borrowed view of genesis data
+    /// for each application to process as needed.
     // TODO: Add validator info, and chain_id
-    fn genesis(&self, _fork: &Fork) -> TxResult {
+    fn genesis(&self, _fork: &Fork, _data: Option<&Vec<u8>>) -> TxResult {
         TxResult::ok()
     }
 
@@ -87,6 +88,13 @@ impl TxResult {
     }
 }
 
+/// Translate a failure::Error in to TxResult::error()
+impl From<failure::Error> for TxResult {
+    fn from(error: failure::Error) -> Self {
+        TxResult::error(1001, format!("{:}", error))
+    }
+}
+
 // Convert a TxResult into a abci.checkTx response
 #[doc(hidden)]
 impl Into<ResponseCheckTx> for TxResult {
@@ -116,21 +124,33 @@ impl Into<ResponseDeliverTx> for TxResult {
 pub struct QueryResult {
     pub code: u32,
     pub value: Vec<u8>,
+    pub log: String,
 }
 
 impl QueryResult {
+    pub fn new<L: Into<String>>(code: u32, value: Vec<u8>, log: L) -> Self {
+        Self {
+            code,
+            value,
+            log: log.into(),
+        }
+    }
     /// Ok: `value` is the result to return from running the query. Since `value`
     /// is a byte array, it's the responsibly of the caller (client) to decode it.
     pub fn ok(value: Vec<u8>) -> Self {
-        Self { code: 0, value }
+        Self::new(0, value, "")
     }
 
     /// Error: provide an application error code
     pub fn error(code: u32) -> Self {
-        Self {
-            code,
-            value: Vec::new(),
-        }
+        Self::new(code, vec![], "")
+    }
+}
+
+/// Translate a failure::Error in to QueryResult::error()
+impl From<failure::Error> for QueryResult {
+    fn from(error: failure::Error) -> Self {
+        QueryResult::new(1002, vec![], format!("{:}", error))
     }
 }
 

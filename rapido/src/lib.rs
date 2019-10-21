@@ -15,7 +15,6 @@ mod appstate;
 
 use abci::*;
 use borsh::BorshDeserialize;
-//use exonum_crypto::Hash;
 use exonum_merkledb::{BinaryValue, Database, Patch};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -34,6 +33,7 @@ pub struct AppBuilder {
     pub db: Arc<dyn Database>,
     pub services: Vec<Box<dyn Service>>,
     pub validate_tx_handler: Option<ValidateTxHandler>,
+    pub genesis_data: Option<Vec<u8>>,
 }
 
 impl AppBuilder {
@@ -43,7 +43,15 @@ impl AppBuilder {
             db,
             services: Vec::new(),
             validate_tx_handler: None,
+            genesis_data: None,
         }
+    }
+
+    pub fn set_genesis_data(mut self, data: Vec<u8>) -> Self {
+        if data.len() > 0 {
+            self.genesis_data = Some(data);
+        }
+        self
     }
 
     /// Set the desired validation handler. If not set, checkTx will return 'ok' by default
@@ -87,6 +95,7 @@ pub struct Node {
     services: HashMap<&'static str, Box<dyn Service>>,
     commit_patches: Vec<Patch>,
     validate_tx_handler: Option<ValidateTxHandler>,
+    genesis_data: Option<Vec<u8>>,
 }
 
 impl Node {
@@ -110,6 +119,7 @@ impl Node {
             services: service_map,
             commit_patches: Vec::new(),
             validate_tx_handler: config.validate_tx_handler,
+            genesis_data: config.genesis_data,
         }
     }
 
@@ -195,7 +205,7 @@ impl abci::Application for Node {
         for (_, service) in &self.services {
             // a little clunky, but only done once
             let fork = self.db.fork();
-            let result = service.genesis(&fork);
+            let result = service.genesis(&fork, self.genesis_data.as_ref());
             if result.code == 0 {
                 // We only save patches from successful transactions
                 self.commit_patches.push(fork.into_patch());

@@ -65,7 +65,7 @@ impl Service for CounterService {
         ROUTE_NAME
     }
 
-    fn genesis(&self, fork: &Fork) -> TxResult {
+    fn genesis(&self, fork: &Fork, _data: Option<&Vec<u8>>) -> TxResult {
         let dave = vec![1u8; 32]; // Genesis account
         let schema = SchemaStore::new(fork);
         schema.add_account(&dave);
