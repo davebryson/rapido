@@ -1,5 +1,21 @@
-[workspace]
-members = [
-    "rapido",
-    "rapido-client",
-]
+[package]
+name = "rapido"
+version = "0.2.0"
+authors = ["David Bryson <daveb@miceda.org>"]
+edition = "2018"
+license = "Apache-2.0"
+keywords = ["tendermint", "blockchain", "abci"]
+description = "A Rust framework for building Tendermint applications"
+
+[dependencies]
+abci = { git = "https://github.com/tendermint/rust-abci", branch = "master" }
+anyhow = "1.0.34"
+base64 = "0.13.0"
+borsh = "0.7.1"
+bs58 = "0.4.0"
+exonum-crypto = "1.0.0"
+exonum-merkledb = "1.0.0"
+hex = "0.4.0"
+
+[dev-dependencies]
+rand = "0.6.5"
