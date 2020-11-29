@@ -10,21 +10,24 @@ pub use self::types::{
     SignedTransaction,
 };
 
+#[macro_use]
+mod macros;
 mod account;
 mod did;
 mod schema;
 mod types;
 
 use crate::schema::RapidoSchema;
-//use crate::types::Context;
 use abci::*;
 use anyhow::bail;
 use borsh::BorshDeserialize;
-use exonum_merkledb::{Database, Fork, ObjectHash, Patch, SystemSchema};
+use exonum_merkledb::{Database, Fork, ObjectHash, SystemSchema};
+use protobuf::RepeatedField;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 const NAME: &str = "rapido_v2";
+const RESERVED_APP_NAME: &str = "rapido";
 
 /// Use the AppBuilder to assemble an application
 pub struct AppBuilder {
@@ -60,7 +63,13 @@ impl AppBuilder {
         self
     }
 
+    pub fn register_apps(mut self, apps: Vec<Box<dyn AppModule>>) -> Self {
+        self.appmodules = apps;
+        self
+    }
+
     /// Add a Service to the application
+    /// TODO: change to register_module()
     pub fn add_service(mut self, handler: Box<dyn AppModule>) -> Self {
         self.appmodules.push(handler);
         self
@@ -81,7 +90,6 @@ impl AppBuilder {
 pub struct Node {
     db: Arc<dyn Database>,
     appmodules: HashMap<&'static str, Box<dyn AppModule>>,
-    commit_patches: Vec<Patch>,
     validate_tx_handler: Option<AuthenticationHandler>,
     genesis_data: Option<Vec<u8>>,
 }
@@ -94,6 +102,10 @@ impl Node {
         let mut service_map = HashMap::new();
         for s in config.appmodules {
             let route = s.name();
+            // Rapido is a reserved app/route name
+            if route == RESERVED_APP_NAME {
+                panic!("Cannot use app module with the name of 'rapido'. The name is reserved");
+            }
             // First come, first serve...
             if !service_map.contains_key(route) {
                 service_map.insert(route, s);
@@ -103,30 +115,35 @@ impl Node {
         Self {
             db: db.clone(),
             appmodules: service_map,
-            commit_patches: Vec::new(),
             validate_tx_handler: config.validate_tx_handler,
             genesis_data: config.genesis_data,
         }
     }
 
     // internal function called by both check/deliver_tx
-    fn run_tx(&mut self, is_check: bool, raw_tx: Vec<u8>) -> Result<(), anyhow::Error> {
+    fn run_tx(
+        &mut self,
+        is_check: bool,
+        raw_tx: Vec<u8>,
+    ) -> Result<RepeatedField<Event>, anyhow::Error> {
         // Decode the incoming signed transaction
         let tx = SignedTransaction::try_from_slice(&raw_tx[..])?;
 
         // Return err if there are no appmodules matching the route
         if !self.appmodules.contains_key(&*tx.app) {
-            bail!(format!("AppMoudule not found for name: {}", tx.app));
+            bail!(format!("No registered Module found for name: {}", tx.app));
         }
 
-        // If this is a check_tx and a validation handler has been
-        // set, run it
+        // If this is a check_tx and a validation handler has been set, run it
         if is_check {
             // NOTE:  checkTx has read-only to store
             let snapshot = self.db.snapshot();
             return match self.validate_tx_handler {
-                Some(handler) => handler(&tx, &snapshot),
-                None => Ok(()),
+                Some(handler) => match handler(&tx, &snapshot) {
+                    Ok(()) => Ok(RepeatedField::new()),
+                    Err(r) => Err(r),
+                },
+                None => Ok(RepeatedField::new()),
             };
         }
 
@@ -140,11 +157,14 @@ impl Node {
         // TODO: Increment account nonce
 
         let ctx = Context::from_tx(tx, &mut fork);
-        let result = app.handle_tx(ctx);
-        if result.is_ok() {
-            self.db.merge(fork.into_patch())?;
+        match app.handle_tx(&ctx) {
+            Ok(()) => {
+                let events = ctx.get_events();
+                self.db.merge(fork.into_patch())?;
+                Ok(events)
+            }
+            Err(r) => Err(r),
         }
-        result
     }
 
     // Called in abci.commit
@@ -161,10 +181,20 @@ impl Node {
 }
 
 // Parse a query route:  It expects query routes to be in the
-// form: 'route/somepath', where 'route' is the name of the service,
+// form: 'appname/somepath', where 'appname' is the name of the AppModule
 // and '/somepath' is your application's specific path. If you
-// want to just query on any key, use the form: 'route/'.
-fn parse_abci_query_path(req_path: &String) -> Option<(&str, &str)> {
+// want to just query on any key, use the form: 'appname/' or 'appname'.
+fn parse_abci_query_path(req_path: &str) -> Option<(&str, &str)> {
+    if req_path.len() == 0 {
+        return None;
+    }
+    if req_path == "/" {
+        return None;
+    }
+    if !req_path.contains("/") {
+        return Some((req_path, "/"));
+    }
+
     req_path
         .find("/")
         .filter(|i| i > &0usize)
@@ -184,19 +214,24 @@ impl abci::Application for Node {
         resp.set_data(String::from(NAME));
         resp.set_version(String::from(req.get_version()));
         resp.set_last_block_height(state.height);
-        resp.set_last_block_app_hash(state.hash.clone());
+        resp.set_last_block_app_hash(state.apphash.clone());
         resp
     }
 
     // Ran once on the initial start of the application
+    // How to use config like substrate here...?
     fn init_chain(&mut self, _req: &RequestInitChain) -> ResponseInitChain {
+        // a little clunky, but only done once
         for (_, app) in &self.appmodules {
-            // a little clunky, but only done once
             let fork = self.db.fork();
             let result = app.initialize(&fork, self.genesis_data.as_ref());
-            if result.is_ok() {
-                // We only save patches from successful transactions
-                self.commit_patches.push(fork.into_patch());
+
+            if result.is_err() {
+                panic!("problem initializing chain with genesis data");
+            }
+
+            if let Err(_) = self.db.merge(fork.into_patch()) {
+                panic!("error");
             }
         }
         ResponseInitChain::new()
@@ -212,7 +247,7 @@ impl abci::Application for Node {
             None => {
                 response.code = 1u32;
                 response.key = req.data.clone();
-                response.log = "No query path found.  Format should be 'route/apppath'".into();
+                response.log = "malformed query path".into();
                 return response;
             }
         };
@@ -220,7 +255,7 @@ impl abci::Application for Node {
         // Check if a app exists for this name
         if !self.appmodules.contains_key(appname) {
             response.code = 1u32;
-            response.log = format!("Cannot find query for appname: {}", appname);
+            response.log = format!("Query: cannot find appname: {}", appname);
             return response;
         }
 
@@ -266,8 +301,9 @@ impl abci::Application for Node {
     fn deliver_tx(&mut self, req: &RequestDeliverTx) -> ResponseDeliverTx {
         let mut resp = ResponseDeliverTx::new();
         match self.run_tx(false, req.tx.clone()) {
-            Ok(_) => {
+            Ok(events) => {
                 resp.set_code(0);
+                resp.events = events;
                 resp
             }
             Err(msg) => {

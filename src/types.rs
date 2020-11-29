@@ -1,14 +1,55 @@
+use abci::{Event, Pair};
 use anyhow::Result;
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{Hash, PublicKey, SecretKey, Signature};
 use exonum_merkledb::{Fork, Snapshot};
+use protobuf::RepeatedField;
+use std::cell::RefCell;
 
-#[derive(Debug)]
+pub struct EventManager {
+    pub appname: String,
+    events: Vec<Event>,
+}
+
+impl EventManager {
+    pub fn new(appname: String) -> Self {
+        Self {
+            appname: appname,
+            events: Vec::new(),
+        }
+    }
+
+    /// Example:
+    /// let pairs = &[("name", "bob"), ("employer", "Acme")];
+    /// eventmanager.emit_event(pairs);
+    pub fn dispatch_event(&mut self, event_type: &str, pairs: &[(&str, &str)]) {
+        let mut rf = RepeatedField::<Pair>::new();
+        for (k, v) in pairs {
+            let mut p = Pair::new();
+            p.set_key(k.as_bytes().to_vec());
+            p.set_value(v.as_bytes().to_vec());
+            rf.push(p);
+        }
+
+        // Create a type with the appname: 'hello.transfer'
+        let full_event_type = format!("{}.{}", self.appname, event_type);
+        let mut e = Event::new();
+        e.set_field_type(full_event_type.into());
+        e.set_attributes(rf);
+        self.events.push(e);
+    }
+
+    pub fn get_events(&self) -> RepeatedField<Event> {
+        RepeatedField::from_vec(self.events.clone())
+    }
+}
+
 pub struct Context<'a> {
     pub sender: Vec<u8>,
     pub msgid: u8,
     pub msg: Vec<u8>,
     pub fork: &'a Fork,
+    event_manager: RefCell<EventManager>,
 }
 
 impl<'a> Context<'a> {
@@ -18,7 +59,18 @@ impl<'a> Context<'a> {
             msgid: tx.msgid,
             msg: tx.msg.clone(),
             fork,
+            event_manager: RefCell::new(EventManager::new(tx.app.clone())),
         }
+    }
+
+    pub fn dispatch_event(&self, event_type: &str, pairs: &[(&str, &str)]) {
+        self.event_manager
+            .borrow_mut()
+            .dispatch_event(event_type, pairs)
+    }
+
+    pub fn get_events(&self) -> RepeatedField<Event> {
+        self.event_manager.borrow().get_events()
     }
 }
 
@@ -45,9 +97,9 @@ pub trait AppModule: Sync + Send {
     }
 
     // Dispatch a transaction to internal handlers
-    fn handle_tx(&self, ctx: Context) -> Result<(), anyhow::Error>;
+    fn handle_tx(&self, ctx: &Context) -> Result<(), anyhow::Error>;
 
-    // TODO: Improve this
+    // Hand a query for a given subpath.
     fn handle_query(
         &self,
         path: &str,
@@ -68,13 +120,15 @@ pub struct SignedTransaction {
     pub msgid: u8,
     /// The encoded bits of the enclosed message
     pub msg: Vec<u8>,
+    // nonce
+    pub nonce: u64,
     /// the signature over the transaction
     pub signature: Vec<u8>,
 }
 
 impl SignedTransaction {
     /// Create a new SignedTransaction
-    pub fn new<M>(sender: Vec<u8>, app: &'static str, msgid: u8, msg: M) -> Self
+    pub fn new<M>(sender: Vec<u8>, app: &'static str, msgid: u8, msg: M, nonce: u64) -> Self
     where
         M: BorshSerialize + BorshDeserialize,
     {
@@ -84,6 +138,7 @@ impl SignedTransaction {
             app: String::from(app),
             msgid,
             msg: payload,
+            nonce,
             signature: Default::default(),
         }
     }
