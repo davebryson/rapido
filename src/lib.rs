@@ -56,7 +56,8 @@ impl AppBuilder {
 
     /// Set genesis data to be used on initial startup. How the data
     /// is interpreted is left to the Service implementation
-    pub fn set_genesis_data(mut self, data: Vec<u8>) -> Self {
+    // TODO: Change this
+    pub fn with_genesis_data(mut self, data: Vec<u8>) -> Self {
         if data.len() > 0 {
             self.genesis_data = Some(data);
         }
@@ -64,20 +65,13 @@ impl AppBuilder {
     }
 
     /// Set the desired validation handler. If not set, checkTx will return 'ok' by default
-    pub fn set_validation_handler(mut self, handler: AuthenticationHandler) -> Self {
+    pub fn with_validation_handler(mut self, handler: AuthenticationHandler) -> Self {
         self.validate_tx_handler = Some(handler);
         self
     }
 
-    pub fn register_apps(mut self, apps: Vec<Box<dyn AppModule>>) -> Self {
-        self.appmodules = apps;
-        self
-    }
-
-    /// Add a Service to the application
-    /// TODO: change to register_module()
-    pub fn add_service(mut self, handler: Box<dyn AppModule>) -> Self {
-        self.appmodules.push(handler);
+    pub fn with_app(mut self, app: impl Into<Box<dyn AppModule>>) -> Self {
+        self.appmodules.push(app.into());
         self
     }
 
@@ -88,6 +82,15 @@ impl AppBuilder {
             panic!("No appmodules configured!");
         }
         Node::new(self)
+    }
+
+    // Run node on localhost
+    pub fn run(self) {
+        if self.appmodules.len() == 0 {
+            panic!("No appmodules configured!");
+        }
+        let node = Node::new(self);
+        abci::run_local(node);
     }
 }
 

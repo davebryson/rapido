@@ -86,7 +86,7 @@ impl Context {
 pub type AuthenticationHandler =
     fn(tx: &SignedTransaction, view: &mut StoreView) -> Result<(), anyhow::Error>;
 
-pub trait AppModule: Sync + Send {
+pub trait AppModule: Sync + Send + 'static {
     /// The routing name of the service. This cooresponds to the route field in a SignedTransaction.
     /// Your service should return a route name that's unique across all services.  Internally the
     /// Rapido node stores services keyed by the route on a first come basis on creation.
@@ -110,6 +110,15 @@ pub trait AppModule: Sync + Send {
         key: Vec<u8>,
         view: &StoreView,
     ) -> Result<Vec<u8>, anyhow::Error>;
+}
+
+impl<T> From<T> for Box<dyn AppModule>
+where
+    T: AppModule,
+{
+    fn from(factory: T) -> Self {
+        Box::new(factory) as Self
+    }
 }
 
 /// SignedTransaction is used to transport transactions from the client to the your

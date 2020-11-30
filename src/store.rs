@@ -118,7 +118,7 @@ impl<'a> StoreView<'a> {
 /// An application can have many different stores.
 /// Example:
 ///
-pub trait Store {
+pub trait Store: Sync + Send {
     /// Specify the key used for this store.
     /// A key can be any value that fulfills the Borsh se/de traits.
     type Key: BorshSerialize + BorshDeserialize;

@@ -125,9 +125,7 @@ fn run_batch(node: &mut rapido::Node, data: Vec<&str>) {
 #[test]
 fn test_basics() {
     let db = Arc::new(TemporaryDB::new());
-    let mut node = AppBuilder::new(db)
-        .add_service(Box::new(PersonHandler {}))
-        .finish();
+    let mut node = AppBuilder::new(db).with_app(PersonHandler {}).finish();
 
     let test_accounts = vec!["a", "b", "c", "d", "e", "f"];
 
