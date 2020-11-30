@@ -5,6 +5,25 @@
 //! * Deterministic message serialization via [Borsh](http://borsh.io/)
 //!
 //! This framework is inspired by exonum and other rust based blockchain projects.
+
+#[macro_use]
+mod macros;
+mod account;
+mod did;
+mod schema;
+mod store;
+mod types;
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use crate::schema::RapidoSchema;
+use abci::*;
+use anyhow::bail;
+use exonum_merkledb::{Database, Fork, ObjectHash, SystemSchema};
+use protobuf::RepeatedField;
+
+// Re-export
 pub use self::{
     store::{Store, StoreView},
     types::{
@@ -12,22 +31,6 @@ pub use self::{
         SignedTransaction,
     },
 };
-
-#[macro_use]
-mod macros;
-mod account;
-mod did;
-mod schema;
-pub mod store;
-mod types;
-
-use crate::schema::RapidoSchema;
-use abci::*;
-use anyhow::bail;
-use exonum_merkledb::{Database, Fork, ObjectHash, SystemSchema};
-use protobuf::RepeatedField;
-use std::collections::HashMap;
-use std::sync::Arc;
 
 const NAME: &str = "rapido_v2";
 const RESERVED_APP_NAME: &str = "rapido";

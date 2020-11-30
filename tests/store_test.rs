@@ -2,7 +2,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_merkledb::{BinaryValue, Database, TemporaryDB};
 use std::{borrow::Cow, convert::AsRef};
 
-use rapido::store::{Store, StoreView};
+use rapido::{Store, StoreView};
 
 #[macro_use]
 extern crate rapido;
