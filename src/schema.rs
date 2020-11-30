@@ -1,13 +1,15 @@
-// Store for rapido information
-use borsh::{BorshDeserialize, BorshSerialize};
-use exonum_merkledb::{
-    access::{Access, AccessExt, RawAccessMut},
-    BinaryValue,
-};
-
 use std::{borrow::Cow, convert::AsRef};
 
+// Store for rapido information
+use borsh::{BorshDeserialize, BorshSerialize};
+use exonum_crypto::Hash;
+use exonum_merkledb::{
+    access::{Access, AccessExt, RawAccessMut},
+    BinaryValue, ProofMapIndex,
+};
+
 const RAPIDO_CHAIN_STATE: &str = "rapido.app.state";
+const RAPIDO_CORE_MAP: &'static str = "rapido.core.map";
 
 #[derive(Debug, BorshSerialize, BorshDeserialize, Clone, PartialEq, Default)]
 pub(crate) struct ChainState {
@@ -43,4 +45,8 @@ where
             .get_entry(RAPIDO_CHAIN_STATE)
             .set(ChainState { height, apphash });
     }
+}
+
+pub(crate) fn get_store<T: Access>(access: T) -> ProofMapIndex<T::Base, Hash, Vec<u8>> {
+    access.get_proof_map(RAPIDO_CORE_MAP)
 }

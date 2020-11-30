@@ -1,14 +1,14 @@
 use abci::*;
 use anyhow::bail;
 use borsh::{BorshDeserialize, BorshSerialize};
-use exonum_merkledb::{BinaryValue, Snapshot, TemporaryDB};
+use exonum_merkledb::{BinaryValue, TemporaryDB};
 use std::sync::Arc;
 use std::{borrow::Cow, convert::AsRef};
 
 #[macro_use]
 extern crate rapido;
 
-use rapido::{AppBuilder, AppModule, CacheMap, Context, SignedTransaction, Store};
+use rapido::{AppBuilder, AppModule, Context, SignedTransaction, Store, StoreView};
 
 // Model
 #[derive(Debug, Clone, PartialEq, BorshSerialize, BorshDeserialize, Default)]
@@ -44,9 +44,9 @@ impl AppModule for PersonHandler {
         "person_app"
     }
 
-    fn handle_tx(&self, ctx: &Context, cache: &mut CacheMap) -> Result<(), anyhow::Error> {
+    fn handle_tx(&self, ctx: &Context, cache: &mut StoreView) -> Result<(), anyhow::Error> {
         // Use the payload vs msgid
-        let msg = Msgs::try_from_slice(&ctx.msg)?;
+        let msg: Msgs = ctx.decode_msg();
         match msg {
             Msgs::CreatePerson(name, age) => {
                 let store = MyStore {};
@@ -81,35 +81,33 @@ impl AppModule for PersonHandler {
         &self,
         path: &str,
         key: Vec<u8>,
-        snapshot: &Box<dyn Snapshot>,
+        view: &StoreView,
     ) -> Result<Vec<u8>, anyhow::Error> {
         match path {
-            "/" => get_person(String::from_utf8(key).unwrap(), snapshot),
+            "/" => get_person(String::from_utf8(key).unwrap(), view),
             "/random" => query_random(),
             _ => bail!(""),
         }
     }
 }
 
-fn get_person(key: String, snapshot: &Box<dyn Snapshot>) -> Result<Vec<u8>, anyhow::Error> {
+// Queries
+fn get_person(key: String, view: &StoreView) -> Result<Vec<u8>, anyhow::Error> {
     let store = MyStore {};
-    match store.query(key, snapshot) {
+    match store.query(key, view) {
         Some(p) => Ok(p.to_bytes()),
         None => bail!("person not found"),
     }
 }
-
-// Queries
 
 fn query_random() -> Result<Vec<u8>, anyhow::Error> {
     Ok(vec![1])
 }
 
 // Helpers
-
 fn create_person_tx(name: String, age: u8) -> RequestDeliverTx {
     let msg = Msgs::CreatePerson(name, age);
-    let tx = SignedTransaction::new([0u8; 10].to_vec(), "person_app", 0u8, msg, 0u64);
+    let tx = SignedTransaction::create([0u8; 10].to_vec(), "person_app", msg, 0u64);
     let mut req = RequestDeliverTx::new();
     req.set_tx(tx.encode());
     req

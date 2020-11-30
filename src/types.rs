@@ -1,12 +1,13 @@
+use std::cell::RefCell;
+
 use abci::{Event, Pair};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{Hash, PublicKey, SecretKey, Signature};
-use exonum_merkledb::{Fork, Snapshot};
+use exonum_merkledb::Fork;
 use protobuf::RepeatedField;
-use std::cell::{Ref, RefCell, RefMut};
 
-use crate::store::CacheMap;
+use crate::store::StoreView;
 
 pub struct EventManager {
     pub appname: String,
@@ -48,7 +49,6 @@ impl EventManager {
 
 pub struct Context {
     pub sender: Vec<u8>,
-    pub msgid: u8,
     pub msg: Vec<u8>,
     event_manager: RefCell<EventManager>,
 }
@@ -56,23 +56,16 @@ pub struct Context {
 impl Context {
     pub fn new(tx: &SignedTransaction) -> Self {
         Self {
-            sender: tx.sender.clone(),
-            msgid: tx.msgid,
-            msg: tx.msg.clone(),
-            event_manager: RefCell::new(EventManager::new(tx.app.clone())),
+            sender: tx.sender(),
+            msg: tx.msg(),
+            event_manager: RefCell::new(EventManager::new(tx.appname().into())),
         }
     }
 
-    /*
-    pub fn from_tx(tx: SignedTransaction, fork: &'a Fork) -> Self {
-        Self {
-            sender: tx.sender.clone(),
-            msgid: tx.msgid,
-            msg: tx.msg.clone(),
-            fork,
-            event_manager: RefCell::new(EventManager::new(tx.app.clone())),
-        }
-    }*/
+    /// Decode a msg in the transaction
+    pub fn decode_msg<M: BorshDeserialize + BorshSerialize>(&self) -> M {
+        M::try_from_slice(&self.msg).expect("decode")
+    }
 
     pub fn dispatch_event(&self, event_type: &str, pairs: &[(&str, &str)]) {
         self.event_manager
@@ -91,7 +84,7 @@ impl Context {
 /// access to storage. Validation checks should be limited to
 /// checking signatures or other read-only operations.
 pub type AuthenticationHandler =
-    fn(tx: &SignedTransaction, store: &mut CacheMap) -> Result<(), anyhow::Error>;
+    fn(tx: &SignedTransaction, view: &mut StoreView) -> Result<(), anyhow::Error>;
 
 pub trait AppModule: Sync + Send {
     /// The routing name of the service. This cooresponds to the route field in a SignedTransaction.
@@ -108,14 +101,14 @@ pub trait AppModule: Sync + Send {
     }
 
     // Dispatch a transaction to internal handlers
-    fn handle_tx(&self, ctx: &Context, store: &mut CacheMap) -> Result<(), anyhow::Error>;
+    fn handle_tx(&self, ctx: &Context, view: &mut StoreView) -> Result<(), anyhow::Error>;
 
     // Hand a query for a given subpath.
     fn handle_query(
         &self,
         path: &str,
         key: Vec<u8>,
-        snapshot: &Box<dyn Snapshot>,
+        view: &StoreView,
     ) -> Result<Vec<u8>, anyhow::Error>;
 }
 
@@ -123,23 +116,21 @@ pub trait AppModule: Sync + Send {
 /// application. It provides a wrapper around application specific transactions.
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct SignedTransaction {
-    /// The sender/signer of the transaction
-    pub sender: Vec<u8>,
+    /// The id of the sender/signer of the transaction
+    sender: Vec<u8>,
     /// The name of the app to call
-    pub app: String,
-    /// An ID to identify the transaction. This can be used to determine which msg to decode
-    pub msgid: u8,
+    app: String,
     /// The encoded bits of the enclosed message
-    pub msg: Vec<u8>,
+    msg: Vec<u8>,
     // nonce
-    pub nonce: u64,
+    nonce: u64,
     /// the signature over the transaction
-    pub signature: Vec<u8>,
+    signature: Vec<u8>,
 }
 
 impl SignedTransaction {
     /// Create a new SignedTransaction
-    pub fn new<M>(sender: Vec<u8>, app: &'static str, msgid: u8, msg: M, nonce: u64) -> Self
+    pub fn create<M>(sender: Vec<u8>, app: &'static str, msg: M, nonce: u64) -> Self
     where
         M: BorshSerialize + BorshDeserialize,
     {
@@ -147,11 +138,30 @@ impl SignedTransaction {
         Self {
             sender,
             app: String::from(app),
-            msgid,
             msg: payload,
             nonce,
             signature: Default::default(),
         }
+    }
+
+    pub fn appname(&self) -> &str {
+        &*self.app
+    }
+
+    pub fn sender(&self) -> Vec<u8> {
+        self.sender.clone()
+    }
+
+    pub fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    pub fn signature(&self) -> Vec<u8> {
+        self.signature.clone()
+    }
+
+    pub fn msg(&self) -> Vec<u8> {
+        self.msg.clone()
     }
 
     /// Convenience method to encode the transaction using BorshSerialization
@@ -161,18 +171,35 @@ impl SignedTransaction {
         self.try_to_vec().expect("encoding signed transaction")
     }
 
+    /// Decode
+    pub fn decode(raw: &[u8]) -> anyhow::Result<Self, anyhow::Error> {
+        SignedTransaction::try_from_slice(raw)
+            .map_err(|_| anyhow!("problem decoding the signed tx"))
+    }
+
+    /// Sign the transaction
+    pub fn sign(&mut self, private_key: &SecretKey) {
+        self.signature = exonum_crypto::sign(&self.hash()[..], private_key)
+            .as_ref()
+            .into();
+    }
+
     fn hash(&self) -> Hash {
         // Hash order: sender, appname, msgid, msg
         let contents: Vec<u8> = vec![
             self.sender.clone(),
             self.app.as_bytes().to_vec(),
-            vec![self.msgid],
             self.msg.clone(),
         ]
         .into_iter()
         .flatten()
         .collect();
         exonum_crypto::hash(&contents[..])
+    }
+
+    /// Convert the tx to a context
+    pub fn into_context(&self) -> Context {
+        Context::new(self)
     }
 }
 

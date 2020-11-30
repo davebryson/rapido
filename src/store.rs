@@ -1,23 +1,35 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use exonum_merkledb::{
-    access::{Access, AccessExt},
-    BinaryValue, Fork, ProofMapIndex, Snapshot,
-};
-
 use exonum_crypto::Hash;
+use exonum_merkledb::{BinaryValue, Fork, Snapshot};
 
-use std::borrow::Cow;
+use crate::schema;
 
-const RAPIDO_CORE_MAP: &'static str = "_rapido_core_map_";
+/// A change to the store
+#[derive(Debug)]
+pub enum ViewChange {
+    Add(Vec<u8>),
+    Remove,
+}
 
-//pub type Cache = BTreeMap<Vec<u8>, Vec<u8>>;
-pub type Cache = HashMap<Hash, Vec<u8>>;
+impl ViewChange {
+    /// Extract the value
+    pub fn get(&self) -> Option<&Vec<u8>> {
+        match self {
+            ViewChange::Add(v) => Some(&v),
+            ViewChange::Remove => None,
+        }
+    }
+}
 
-// Could use hash for this and Hash as key in main table
+/// Hashmap cache
+pub(crate) type Cache = HashMap<Hash, ViewChange>;
+
+/// StoreKey used to prefix each key based on the store.name()
 #[derive(Debug, Clone, PartialEq, BorshSerialize, BorshDeserialize, Default)]
-pub struct StoreKey<K> {
+pub(crate) struct StoreKey<K> {
     prefix: String,
     key: K,
 }
@@ -38,25 +50,31 @@ where
     }
 }
 
-// MOVE TO SCHEMA
-pub(crate) fn get_store<T: Access>(access: T) -> ProofMapIndex<T::Base, Hash, Vec<u8>> {
-    access.get_proof_map(RAPIDO_CORE_MAP)
-}
-
+/// Provides cached access to a store
 #[derive(Debug)]
-pub struct CacheMap<'a> {
+pub struct StoreView<'a> {
     cache: Cache,
     access: &'a Box<dyn Snapshot>,
 }
 
-impl<'a> CacheMap<'a> {
+impl<'a> StoreView<'a> {
+    /// Return a new view with cache
     pub fn wrap(db: &'a Box<dyn Snapshot>, cache: Cache) -> Self {
-        CacheMap {
+        StoreView {
             access: db,
             cache: cache,
         }
     }
 
+    /// Return a view when we only want the latest snapshot
+    pub fn wrap_snapshot(db: &'a Box<dyn Snapshot>) -> Self {
+        StoreView {
+            access: db,
+            cache: Default::default(),
+        }
+    }
+
+    /// Consume the cache
     pub fn into_cache(self) -> Cache {
         self.cache
     }
@@ -66,48 +84,75 @@ impl<'a> CacheMap<'a> {
     }
 
     pub fn get(&self, key: &Hash) -> Option<&Vec<u8>> {
-        self.cache.get(&key)
+        if let Some(cv) = self.cache.get(&key) {
+            return cv.get();
+        }
+        None
     }
 
     pub fn get_from_store(&self, key: &Hash) -> Option<Vec<u8>> {
-        get_store(self.access).get(&key)
+        schema::get_store(self.access).get(&key)
     }
 
     pub fn put(&mut self, key: Hash, value: impl BinaryValue) {
-        self.cache.insert(key, value.to_bytes());
+        self.cache.insert(key, ViewChange::Add(value.to_bytes()));
     }
 
+    pub fn remove(&mut self, key: Hash) {
+        self.cache.insert(key, ViewChange::Remove);
+    }
+
+    /// Called on abci.commit to write all changes to the merkle store
     pub fn commit(&self, fork: &Fork) {
-        let mut store = get_store(fork);
-        for (k, v) in &self.cache {
-            store.put(k, v.to_owned());
+        let mut store = schema::get_store(fork);
+        for (k, cv) in &self.cache {
+            match cv {
+                ViewChange::Add(value) => store.put(k, value.to_owned()),
+                ViewChange::Remove => store.remove(k),
+            }
         }
     }
 }
 
-// A store takes a cachmap as params to put,get, etc...
-// TODO: Add: remove, get_proof, contains
+/// Implement this trait to create a store for your application.
+/// An application can have many different stores.
+/// Example:
+///
 pub trait Store {
+    /// Specify the key used for this store.
+    /// A key can be any value that fulfills the Borsh se/de traits.
     type Key: BorshSerialize + BorshDeserialize;
+
+    /// Specify what will be stored.  The value must fulfill the
+    /// BinaryValue trait.  Use the macro: `impl_store_values()` to do so.
     type Value: BinaryValue;
 
+    /// Return a unique name for the store.  Recommend using  'appname + name'.
+    /// For example, if the appname is 'example' and you define a store for 'People'
+    /// values, name should return: 'example.people'.  This value must be unique as
+    // it's used as a prefix to the key name in the MerkleTree.
     fn name(&self) -> String;
 
-    fn put(&self, key: Self::Key, v: Self::Value, cache: &mut CacheMap) {
+    /// Put a value in the store
+    fn put(&self, key: Self::Key, v: Self::Value, view: &mut StoreView) {
         let hash = StoreKey::create(self.name(), key).hash();
-        cache.put(hash, v)
+        view.put(hash, v)
     }
 
-    fn get(&self, key: Self::Key, cache: &mut CacheMap) -> Option<Self::Value> {
+    /// Get a value from the store
+    fn get(&self, key: Self::Key, view: &StoreView) -> Option<Self::Value> {
         let hash = StoreKey::create(self.name(), key).hash();
-        if let Some(v) = cache.get(&hash) {
+
+        // Check the cache first
+        if let Some(v) = view.get(&hash) {
             return match Self::Value::from_bytes(Cow::Owned(v.clone())) {
                 Ok(r) => Some(r),
                 _ => None,
             };
         }
 
-        if let Some(v) = cache.get_from_store(&hash) {
+        // Not in the cache, check the latest snapshot of committed values
+        if let Some(v) = view.get_from_store(&hash) {
             return match Self::Value::from_bytes(Cow::Owned(v.clone())) {
                 Ok(r) => Some(r),
                 _ => None,
@@ -117,10 +162,10 @@ pub trait Store {
         None
     }
 
-    fn query(&self, key: Self::Key, snapshot: &Box<dyn Snapshot>) -> Option<Self::Value> {
+    /// Query the latest committed data for the value
+    fn query(&self, key: Self::Key, view: &StoreView) -> Option<Self::Value> {
         let hash = StoreKey::create(self.name(), key).hash();
-        let store = get_store(snapshot);
-        if let Some(v) = store.get(&hash) {
+        if let Some(v) = view.get_from_store(&hash) {
             return match Self::Value::from_bytes(Cow::Owned(v.clone())) {
                 Ok(r) => Some(r),
                 _ => None,
@@ -129,9 +174,18 @@ pub trait Store {
         None
     }
 
-    //fn remove(&self, key: &Vec<u8>, cache: &mut CacheMap) {}
+    /// Remove a value
+    fn remove(&self, key: Self::Key, view: &mut StoreView) {
+        let hash = StoreKey::create(self.name(), key).hash();
+        view.remove(hash)
+    }
 
+    /// Does the give key exists?
+    fn contains_key(&self, key: Self::Key, view: &StoreView) -> bool {
+        let hash = StoreKey::create(self.name(), key).hash();
+        view.exists(&hash)
+    }
+
+    // TODO:
     //fn get_proof(&self, key: &Vec<u8>);
-
-    //fn exists(&self, key: &Vec<u8>);
 }

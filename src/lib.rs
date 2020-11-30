@@ -6,7 +6,7 @@
 //!
 //! This framework is inspired by exonum and other rust based blockchain projects.
 pub use self::{
-    store::{CacheMap, Store},
+    store::{Store, StoreView},
     types::{
         sign_transaction, verify_tx_signature, AppModule, AuthenticationHandler, Context,
         SignedTransaction,
@@ -134,20 +134,22 @@ impl Node {
         is_check: bool,
         raw_tx: Vec<u8>,
     ) -> Result<RepeatedField<Event>, anyhow::Error> {
-        // Decode the incoming signed transaction
-        let tx = SignedTransaction::try_from_slice(&raw_tx[..])?;
+        // Decode the incoming transaction
+        let tx = SignedTransaction::decode(&raw_tx[..])?;
 
         // Return err if there are no appmodules matching the route
-        if !self.appmodules.contains_key(&*tx.app) {
-            bail!(format!("No registered Module found for name: {}", tx.app));
+        if !self.appmodules.contains_key(tx.appname()) {
+            bail!(format!(
+                "No registered Module found for name: {}",
+                tx.appname()
+            ));
         }
 
         // If this is a check_tx and a validation handler has been set, run it
         if is_check && self.validate_tx_handler.is_some() {
             let snap = self.db.snapshot();
-            let mut cache = store::CacheMap::wrap(&snap, self.check_cache.take().unwrap());
+            let mut cache = store::StoreView::wrap(&snap, self.check_cache.take().unwrap());
 
-            //let snapshot = self.db.snapshot();
             let resp = match self.validate_tx_handler {
                 Some(handler) => match handler(&tx, &mut cache) {
                     Ok(()) => Ok(RepeatedField::<Event>::new()),
@@ -160,13 +162,13 @@ impl Node {
         }
 
         // Run DeliverTx by:
-        let app = self.appmodules.get(&*tx.app).expect("app module");
+        let app = self.appmodules.get(tx.appname()).expect("app module");
         let snap = self.db.snapshot();
-        let mut cache = store::CacheMap::wrap(&snap, self.deliver_cache.take().unwrap());
+        let mut cache = store::StoreView::wrap(&snap, self.deliver_cache.take().unwrap());
 
         // TODO: Increment account nonce
 
-        let ctx = Context::new(&tx);
+        let ctx = tx.into_context();
         let resp = match app.handle_tx(&ctx, &mut cache) {
             Ok(()) => {
                 let events = ctx.get_events();
@@ -174,6 +176,7 @@ impl Node {
             }
             Err(r) => Err(r),
         };
+
         self.deliver_cache.replace(cache.into_cache());
         resp
     }
@@ -231,6 +234,8 @@ impl abci::Application for Node {
 
     // Ran once on the initial start of the application
     // How to use config like substrate here...?
+    // TODO:  Doesn't init_chain call commit?!  If so,
+    // Change this to use storeview
     fn init_chain(&mut self, _req: &RequestInitChain) -> ResponseInitChain {
         // a little clunky, but only done once
         for (_, app) in &self.appmodules {
@@ -245,6 +250,7 @@ impl abci::Application for Node {
                 panic!("error");
             }
         }
+        // THIS SHOULD RETURN INITIAL APP HASH!
         ResponseInitChain::new()
     }
 
@@ -272,12 +278,13 @@ impl abci::Application for Node {
 
         // Call handle_query
         let snapshot = self.db.snapshot();
+        let cache = store::StoreView::wrap_snapshot(&snapshot);
         match self
             .appmodules
             .get(appname)
             .unwrap() // <= we unwrap here, because we already checked for it above.
             // So, panic here if something else occurs
-            .handle_query(query_path, key, &snapshot)
+            .handle_query(query_path, key, &cache)
         {
             Ok(value) => {
                 response.code = 0;
@@ -336,7 +343,7 @@ impl abci::Application for Node {
 
     fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
         let snap = self.db.snapshot();
-        let cache = store::CacheMap::wrap(&snap, self.deliver_cache.take().unwrap());
+        let cache = store::StoreView::wrap(&snap, self.deliver_cache.take().unwrap());
 
         let fork = self.db.fork();
         cache.commit(&fork);

@@ -93,7 +93,7 @@ pub fn account_authentication(
     tx: &SignedTransaction,
     snapshot: &Box<dyn Snapshot>,
 ) -> Result<(), anyhow::Error> {
-    let acct = AccountManager::get_account(tx.sender.clone(), snapshot).unwrap();
+    let acct = AccountManager::get_account(tx.sender(), snapshot).unwrap();
     let pkbytes = PublicKey::from_slice(&acct.pubkey).unwrap();
 
     // Check signature
@@ -104,7 +104,7 @@ pub fn account_authentication(
     // TODO: Nonce check is tricky!  If the person submits several transactions to
     // the pool at once, where/when do you inc the nonce?
     // check nonce
-    if tx.nonce != acct.nonce {
+    if tx.nonce() != acct.nonce {
         anyhow::bail!("bad nonce")
     }
 
