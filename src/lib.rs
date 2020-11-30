@@ -24,7 +24,6 @@ mod types;
 use crate::schema::RapidoSchema;
 use abci::*;
 use anyhow::bail;
-use borsh::BorshDeserialize;
 use exonum_merkledb::{Database, Fork, ObjectHash, SystemSchema};
 use protobuf::RepeatedField;
 use std::collections::HashMap;

@@ -73,7 +73,6 @@ impl AppModule for PersonHandler {
                     _ => bail!("person not found"),
                 }
             }
-            _ => bail!("unknown message"),
         }
     }
 
