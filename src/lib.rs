@@ -5,9 +5,12 @@
 //! * Deterministic message serialization via [Borsh](http://borsh.io/)
 //!
 //! This framework is inspired by exonum and other rust based blockchain projects.
-pub use self::types::{
-    sign_transaction, verify_tx_signature, AppModule, AuthenticationHandler, Context,
-    SignedTransaction,
+pub use self::{
+    store::{CacheMap, Store},
+    types::{
+        sign_transaction, verify_tx_signature, AppModule, AuthenticationHandler, Context,
+        SignedTransaction,
+    },
 };
 
 #[macro_use]
@@ -15,6 +18,7 @@ mod macros;
 mod account;
 mod did;
 mod schema;
+pub mod store;
 mod types;
 
 use crate::schema::RapidoSchema;
@@ -92,6 +96,8 @@ pub struct Node {
     appmodules: HashMap<&'static str, Box<dyn AppModule>>,
     validate_tx_handler: Option<AuthenticationHandler>,
     genesis_data: Option<Vec<u8>>,
+    check_cache: Option<store::Cache>,
+    deliver_cache: Option<store::Cache>,
 }
 
 impl Node {
@@ -117,6 +123,8 @@ impl Node {
             appmodules: service_map,
             validate_tx_handler: config.validate_tx_handler,
             genesis_data: config.genesis_data,
+            check_cache: Some(Default::default()),
+            deliver_cache: Some(Default::default()),
         }
     }
 
@@ -135,36 +143,39 @@ impl Node {
         }
 
         // If this is a check_tx and a validation handler has been set, run it
-        if is_check {
-            // NOTE:  checkTx has read-only to store
-            let snapshot = self.db.snapshot();
-            return match self.validate_tx_handler {
-                Some(handler) => match handler(&tx, &snapshot) {
-                    Ok(()) => Ok(RepeatedField::new()),
+        if is_check && self.validate_tx_handler.is_some() {
+            let snap = self.db.snapshot();
+            let mut cache = store::CacheMap::wrap(&snap, self.check_cache.take().unwrap());
+
+            //let snapshot = self.db.snapshot();
+            let resp = match self.validate_tx_handler {
+                Some(handler) => match handler(&tx, &mut cache) {
+                    Ok(()) => Ok(RepeatedField::<Event>::new()),
                     Err(r) => Err(r),
                 },
                 None => Ok(RepeatedField::new()),
             };
+            self.check_cache.replace(cache.into_cache());
+            return resp;
         }
 
         // Run DeliverTx by:
-        // - Getting the service based on the signed transaction 'route'
-        // - Decoding the message in the signed transaction
-        // - executing the associated Transaction
-        let mut fork = self.db.fork();
         let app = self.appmodules.get(&*tx.app).expect("app module");
+        let snap = self.db.snapshot();
+        let mut cache = store::CacheMap::wrap(&snap, self.deliver_cache.take().unwrap());
 
         // TODO: Increment account nonce
 
-        let ctx = Context::from_tx(tx, &mut fork);
-        match app.handle_tx(&ctx) {
+        let ctx = Context::new(&tx);
+        let resp = match app.handle_tx(&ctx, &mut cache) {
             Ok(()) => {
                 let events = ctx.get_events();
-                self.db.merge(fork.into_patch())?;
                 Ok(events)
             }
             Err(r) => Err(r),
-        }
+        };
+        self.deliver_cache.replace(cache.into_cache());
+        resp
     }
 
     // Called in abci.commit
@@ -324,12 +335,19 @@ impl abci::Application for Node {
     }
 
     fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
+        let snap = self.db.snapshot();
+        let cache = store::CacheMap::wrap(&snap, self.deliver_cache.take().unwrap());
+
         let fork = self.db.fork();
+        cache.commit(&fork);
 
         let apphash = self.update_state(&fork);
         self.db
             .merge(fork.into_patch())
             .expect("abci:commit appstate");
+
+        self.deliver_cache.replace(Default::default());
+        self.check_cache.replace(Default::default());
 
         let mut resp = ResponseCommit::new();
         resp.set_data(apphash);

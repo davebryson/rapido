@@ -1,4 +1,13 @@
-use std::collections::BTreeMap;
+use borsh::{BorshDeserialize, BorshSerialize};
+use exonum_merkledb::{BinaryValue, Database, TemporaryDB};
+use std::{borrow::Cow, convert::AsRef};
+
+use rapido::store::{CacheMap, Store};
+
+#[macro_use]
+extern crate rapido;
+
+/*use std::collections::BTreeMap;
 
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_merkledb::{
@@ -25,14 +34,6 @@ impl StoreKey {
         Self { prefix, key }
     }
 }
-
-#[derive(Debug, Clone, PartialEq, BorshSerialize, BorshDeserialize, Default)]
-pub struct Person {
-    name: String,
-    age: u8,
-}
-
-impl_store_values!(StoreKey, Person);
 
 // Cache should take snapshot
 #[derive(Debug)]
@@ -111,11 +112,20 @@ pub trait Store {
 
         None
     }
+}*/
+
+#[derive(Debug, Clone, PartialEq, BorshSerialize, BorshDeserialize, Default)]
+pub struct Person {
+    name: String,
+    age: u8,
 }
+
+impl_store_values!(Person);
 
 // Add BinaryKey as a type also?
 pub struct MyStore;
 impl Store for MyStore {
+    type Key = String;
     type Value = Person;
 
     fn name(&self) -> String {
@@ -126,12 +136,12 @@ impl Store for MyStore {
 #[test]
 fn test_store_trait() {
     let db: Box<dyn Database> = Box::new(TemporaryDB::new());
-    let sn = db.snapshot();
-    let mut c1 = CacheMap::new(&sn);
+    let snap = db.snapshot();
+    let mut c1 = CacheMap::wrap(&snap, Default::default());
 
     let store = MyStore {};
     store.put(
-        vec![1],
+        "bob".into(),
         Person {
             name: "bob".into(),
             age: 1u8,
@@ -140,7 +150,7 @@ fn test_store_trait() {
     );
 
     store.put(
-        vec![2],
+        "carl".into(),
         Person {
             name: "carl".into(),
             age: 2u8,
@@ -149,8 +159,8 @@ fn test_store_trait() {
     );
 
     // This passes because we haven't committed
-    assert!(store.get(&vec![1], &mut c1).is_some());
-    assert!(store.get(&vec![11], &mut c1).is_none());
+    assert!(store.get("bob".into(), &mut c1).is_some());
+    assert!(store.get("bad".into(), &mut c1).is_none());
 
     let t = c1.into_cache();
     println!("{:?}", t);

@@ -4,7 +4,9 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{Hash, PublicKey, SecretKey, Signature};
 use exonum_merkledb::{Fork, Snapshot};
 use protobuf::RepeatedField;
-use std::cell::RefCell;
+use std::cell::{Ref, RefCell, RefMut};
+
+use crate::store::CacheMap;
 
 pub struct EventManager {
     pub appname: String,
@@ -44,15 +46,24 @@ impl EventManager {
     }
 }
 
-pub struct Context<'a> {
+pub struct Context {
     pub sender: Vec<u8>,
     pub msgid: u8,
     pub msg: Vec<u8>,
-    pub fork: &'a Fork,
     event_manager: RefCell<EventManager>,
 }
 
-impl<'a> Context<'a> {
+impl Context {
+    pub fn new(tx: &SignedTransaction) -> Self {
+        Self {
+            sender: tx.sender.clone(),
+            msgid: tx.msgid,
+            msg: tx.msg.clone(),
+            event_manager: RefCell::new(EventManager::new(tx.app.clone())),
+        }
+    }
+
+    /*
     pub fn from_tx(tx: SignedTransaction, fork: &'a Fork) -> Self {
         Self {
             sender: tx.sender.clone(),
@@ -61,7 +72,7 @@ impl<'a> Context<'a> {
             fork,
             event_manager: RefCell::new(EventManager::new(tx.app.clone())),
         }
-    }
+    }*/
 
     pub fn dispatch_event(&self, event_type: &str, pairs: &[(&str, &str)]) {
         self.event_manager
@@ -80,7 +91,7 @@ impl<'a> Context<'a> {
 /// access to storage. Validation checks should be limited to
 /// checking signatures or other read-only operations.
 pub type AuthenticationHandler =
-    fn(tx: &SignedTransaction, snapshot: &Box<dyn Snapshot>) -> Result<(), anyhow::Error>;
+    fn(tx: &SignedTransaction, store: &mut CacheMap) -> Result<(), anyhow::Error>;
 
 pub trait AppModule: Sync + Send {
     /// The routing name of the service. This cooresponds to the route field in a SignedTransaction.
@@ -97,7 +108,7 @@ pub trait AppModule: Sync + Send {
     }
 
     // Dispatch a transaction to internal handlers
-    fn handle_tx(&self, ctx: &Context) -> Result<(), anyhow::Error>;
+    fn handle_tx(&self, ctx: &Context, store: &mut CacheMap) -> Result<(), anyhow::Error>;
 
     // Hand a query for a given subpath.
     fn handle_query(

@@ -1,3 +1,4 @@
+/*
 use anyhow::bail;
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::Hash;
@@ -96,8 +97,10 @@ fn query_count(snapshot: &Box<dyn Snapshot>) -> Result<Vec<u8>, anyhow::Error> {
 fn query_random() -> Result<Vec<u8>, anyhow::Error> {
     Ok("hello there".as_bytes().to_vec())
 }
+*/
 
 fn main() {
+    /*
     let db = Arc::new(TemporaryDB::new());
     let node = AppBuilder::new(db)
         //.add_service(Box::new(CounterExample {}))
@@ -105,4 +108,5 @@ fn main() {
         .finish();
 
     abci::run_local(node);
+    */
 }

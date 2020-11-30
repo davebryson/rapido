@@ -2,7 +2,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_merkledb::{
     access::{Access, AccessExt, RawAccessMut},
-    BinaryValue, ObjectHash,
+    BinaryValue,
 };
 
 use std::{borrow::Cow, convert::AsRef};

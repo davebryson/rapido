@@ -16,7 +16,7 @@ macro_rules! impl_store_values {
             }
 
             #[allow(clippy::use_self)] // false positive
-            impl ObjectHash for $type {
+            impl exonum_merkledb::ObjectHash for $type {
                 fn object_hash(&self) -> exonum_crypto::Hash {
                     exonum_crypto::hash(&self::BinaryValue::to_bytes(self))
                 }
