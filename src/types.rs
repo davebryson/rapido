@@ -210,6 +210,12 @@ impl SignedTransaction {
     pub fn into_context(&self) -> Context {
         Context::new(self)
     }
+
+    // Encode the Tx as a hex value (prefixed with 0x).
+    // Can be used to send Txs via http GET api.
+    pub fn to_hex(&self) -> String {
+        format!("0x{:}", hex::encode(self.encode()))
+    }
 }
 
 pub fn sign_transaction(tx: &mut SignedTransaction, private_key: &SecretKey) {
