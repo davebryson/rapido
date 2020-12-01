@@ -1,112 +1,114 @@
+use super::{Store, StoreView};
+use anyhow::{bail, ensure};
 use borsh::{BorshDeserialize, BorshSerialize};
-use exonum_crypto::{PublicKey, PUBLIC_KEY_LENGTH};
-use exonum_merkledb::{
-    access::{Access, AccessExt, RawAccessMut},
-    BinaryValue, ObjectHash, ProofMapIndex, Snapshot,
-};
-use std::{borrow::Cow, convert::AsRef};
+use exonum_crypto::PublicKey;
 
-use super::{verify_tx_signature, SignedTransaction};
+use crate::types::AccountId;
 
-const ACCOUNT_STORE: &str = "rapido_account";
+pub mod dev;
+pub mod handler;
 
-// Did format:
-// base58(sha256(publickey))
-// did:rapido:{did}
+//pub use self::handler::authenticate;
 
-// Mut Actions:
-// create_account (create)
-// change_master (change_master)
-// revoke (revoke)
-// increment_nonce (inc_nonce)
+const PUBKEY_SIZE: usize = 32;
 
-// Read:
-// get_account
-// exists(did)
+pub type PubKeyBytes = [u8; PUBKEY_SIZE];
 
-// What should be callable from other AppModules?
-
-#[derive(Debug, BorshSerialize, BorshDeserialize, Clone, PartialEq, Default)]
-pub struct DidAccount {
-    pub did: Vec<u8>,
-    pub nonce: u64,
-    // Authentication Key
-    pub pubkey: [u8; PUBLIC_KEY_LENGTH],
-    pub revoked: bool,
+pub fn generate_did(pk: PublicKey) -> String {
+    let identifer =
+        bs58::encode(exonum_crypto::hash(&pk.as_bytes()[..]).as_bytes().to_vec()).into_string();
+    format!("did:rapido:{}", identifer)
 }
 
-// Make it a stored value
-impl_store_values!(DidAccount);
-
-#[derive(Debug)]
-pub(crate) struct AccountSchema<T: Access> {
-    access: T,
+#[derive(BorshDeserialize, BorshSerialize, Debug, PartialEq, Clone)]
+pub struct Account {
+    id: AccountId, // base58(hash(pubkey)))
+    nonce: u64,
+    pubkey: PubKeyBytes,
 }
 
-// methods:
-// contains_key -> bool
-// get(key) -> T
-impl<T: Access> AccountSchema<T> {
-    pub fn new(access: T) -> Self {
-        Self { access }
-    }
-
-    pub fn account(&self) -> ProofMapIndex<T::Base, Vec<u8>, DidAccount> {
-        self.access.get_proof_map(ACCOUNT_STORE)
-    }
-
-    pub fn get(&self, did: Vec<u8>) -> Option<DidAccount> {
-        self.account().get(&did)
-    }
-}
-
-impl<T: Access> AccountSchema<T>
-where
-    T::Base: RawAccessMut,
-{
-    pub fn insert(&mut self, k: Vec<u8>, v: DidAccount) {
-        self.account().put(&k, v);
-    }
-
-    pub fn remove(&mut self, k: Vec<u8>) {
-        self.account().remove(&k);
-    }
-}
-
-pub struct AccountManager;
-impl AccountManager {
-    pub fn get_account(k: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> Option<DidAccount> {
-        let store = AccountSchema::new(snapshot);
-        store.get(k)
-    }
-
-    pub fn nonce(k: Vec<u8>, snapshot: &Box<dyn Snapshot>) -> Option<u64> {
-        let store = AccountSchema::new(snapshot);
-        match store.get(k) {
-            Some(acct) => Some(acct.nonce),
-            _ => None,
+impl Account {
+    // Make an Id based on the base58 of hash of the pubkey
+    pub fn create(pk: PublicKey) -> Self {
+        Self {
+            id: generate_did(pk),
+            nonce: 0u64,
+            pubkey: pk.as_bytes(),
         }
     }
+
+    pub fn inc_nonce(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            nonce: self.nonce + 1,
+            pubkey: self.pubkey,
+        }
+    }
+
+    pub fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    pub fn nonce(&self) -> u64 {
+        self.nonce
+    }
+
+    pub fn pubkey(&self) -> Option<PublicKey> {
+        PublicKey::from_slice(&self.pubkey)
+    }
+
+    pub fn pubkey_as_hex(&self) -> String {
+        format!("0x{:}", hex::encode(self.pubkey))
+    }
 }
 
-pub fn account_authentication(
-    tx: &SignedTransaction,
-    snapshot: &Box<dyn Snapshot>,
-) -> Result<(), anyhow::Error> {
-    let acct = AccountManager::get_account(tx.sender(), snapshot).unwrap();
-    let pkbytes = PublicKey::from_slice(&acct.pubkey).unwrap();
+impl_store_values!(Account);
 
-    // Check signature
-    if !verify_tx_signature(tx, &pkbytes) {
-        anyhow::bail!("bad signature")
+pub(crate) struct AccountStore;
+impl Store for AccountStore {
+    type Key = String;
+    type Value = Account;
+
+    fn name(&self) -> String {
+        "rapido.account.store".into()
+    }
+}
+
+impl AccountStore {
+    pub fn new() -> Self {
+        Self {}
     }
 
-    // TODO: Nonce check is tricky!  If the person submits several transactions to
-    // the pool at once, where/when do you inc the nonce?
-    // check nonce
-    if tx.nonce() != acct.nonce {
-        anyhow::bail!("bad nonce")
+    pub fn save(&self, account: Account, view: &mut StoreView) {
+        self.put(account.id(), account, view)
     }
 
-    Ok(())
+    pub fn get_account<I: Into<String>>(&self, id: I, view: &StoreView) -> Option<Account> {
+        self.get(id.into(), view)
+    }
+
+    pub fn has_account<I: Into<String>>(&self, id: I, view: &StoreView) -> bool {
+        self.get_account(id, view).is_some()
+    }
+
+    pub fn get_publickey<I: Into<String>>(&self, id: I, view: &StoreView) -> Option<String> {
+        self.get_account(id, view)
+            .and_then(|acct| Some(acct.pubkey_as_hex()))
+    }
+
+    pub fn get_nonce<I: Into<String>>(&self, id: I, view: &StoreView) -> Option<u64> {
+        self.get_account(id, view)
+            .and_then(|acct| Some(acct.nonce()))
+    }
+}
+
+pub fn increment_nonce<I: Into<String>>(id: I, view: &mut StoreView) -> Result<(), anyhow::Error> {
+    let store = AccountStore::new();
+    match store.get_account(id, view) {
+        Some(acct) => {
+            store.save(acct.inc_nonce(), view);
+            Ok(())
+        }
+        _ => bail!("Account not found"),
+    }
 }

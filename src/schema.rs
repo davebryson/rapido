@@ -1,11 +1,11 @@
-use std::{borrow::Cow, convert::AsRef};
+use std::convert::AsRef;
 
 // Store for rapido information
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::Hash;
 use exonum_merkledb::{
     access::{Access, AccessExt, RawAccessMut},
-    BinaryValue, ProofMapIndex,
+    ProofMapIndex,
 };
 
 const RAPIDO_CHAIN_STATE: &str = "rapido.app.state";

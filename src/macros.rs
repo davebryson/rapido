@@ -10,7 +10,7 @@ macro_rules! impl_store_values {
                     self.try_to_vec().unwrap()
                 }
 
-                fn from_bytes(bytes: Cow<[u8]>) -> Result<Self, anyhow::Error> {
+                fn from_bytes(bytes: std::borrow::Cow<[u8]>) -> Result<Self, anyhow::Error> {
                     Self::try_from_slice(bytes.as_ref()).map_err(From::from)
                 }
             }
@@ -18,7 +18,7 @@ macro_rules! impl_store_values {
             #[allow(clippy::use_self)] // false positive
             impl exonum_merkledb::ObjectHash for $type {
                 fn object_hash(&self) -> exonum_crypto::Hash {
-                    exonum_crypto::hash(&self::BinaryValue::to_bytes(self))
+                    exonum_crypto::hash(&exonum_merkledb::BinaryValue::to_bytes(self))
                 }
             }
         )*

@@ -11,7 +11,7 @@ enum Message {
 
 #[test]
 fn test_signed_transaction() {
-    let accountid = vec![1];
+    let accountid = "dave";
     let (pk, sk) = gen_keypair();
     let mut tx = SignedTransaction::create(accountid.clone(), "example", Message::Add(10u16), 1u64);
     tx.sign(&sk);

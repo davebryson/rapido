@@ -1,6 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use exonum_merkledb::{BinaryValue, Database, TemporaryDB};
-use std::{borrow::Cow, convert::AsRef};
+use exonum_merkledb::{Database, TemporaryDB};
 
 use rapido::{Store, StoreView};
 

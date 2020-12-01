@@ -8,8 +8,9 @@
 
 #[macro_use]
 mod macros;
-mod account;
-mod did;
+pub mod account;
+mod auth;
+pub mod client;
 mod schema;
 mod store;
 mod types;
@@ -19,7 +20,7 @@ use std::sync::Arc;
 
 use crate::schema::RapidoSchema;
 use abci::*;
-use anyhow::bail;
+use anyhow::{bail, ensure};
 use exonum_merkledb::{Database, Fork, ObjectHash, SystemSchema};
 use protobuf::RepeatedField;
 
@@ -27,8 +28,7 @@ use protobuf::RepeatedField;
 pub use self::{
     store::{Store, StoreView},
     types::{
-        sign_transaction, verify_tx_signature, AppModule, AuthenticationHandler, Context,
-        SignedTransaction,
+        sign_transaction, verify_tx_signature, AppModule, Authenticator, Context, SignedTransaction,
     },
 };
 
@@ -39,7 +39,7 @@ const RESERVED_APP_NAME: &str = "rapido";
 pub struct AppBuilder {
     pub db: Arc<dyn Database>,
     pub appmodules: Vec<Box<dyn AppModule>>,
-    pub validate_tx_handler: Option<AuthenticationHandler>,
+    pub validate_tx_handler: Option<Box<dyn Authenticator>>,
     pub genesis_data: Option<Vec<u8>>,
 }
 
@@ -65,8 +65,8 @@ impl AppBuilder {
     }
 
     /// Set the desired validation handler. If not set, checkTx will return 'ok' by default
-    pub fn with_validation_handler(mut self, handler: AuthenticationHandler) -> Self {
-        self.validate_tx_handler = Some(handler);
+    pub fn set_authenticator(mut self, authenticator: impl Into<Box<dyn Authenticator>>) -> Self {
+        self.validate_tx_handler = Some(authenticator.into());
         self
     }
 
@@ -99,7 +99,7 @@ impl AppBuilder {
 pub struct Node {
     db: Arc<dyn Database>,
     appmodules: HashMap<&'static str, Box<dyn AppModule>>,
-    validate_tx_handler: Option<AuthenticationHandler>,
+    authenticator: Box<dyn Authenticator>,
     genesis_data: Option<Vec<u8>>,
     check_cache: Option<store::Cache>,
     deliver_cache: Option<store::Cache>,
@@ -123,10 +123,16 @@ impl Node {
             }
         }
 
+        // Use the default authenticator if one is not set.
+        let auth = match config.validate_tx_handler {
+            Some(a) => a,
+            None => Box::new(auth::DefaultAuthenticator),
+        };
+
         Self {
             db: db.clone(),
             appmodules: service_map,
-            validate_tx_handler: config.validate_tx_handler,
+            authenticator: auth,
             genesis_data: config.genesis_data,
             check_cache: Some(Default::default()),
             deliver_cache: Some(Default::default()),
@@ -138,7 +144,7 @@ impl Node {
         &mut self,
         is_check: bool,
         raw_tx: Vec<u8>,
-    ) -> Result<RepeatedField<Event>, anyhow::Error> {
+    ) -> anyhow::Result<RepeatedField<Event>, anyhow::Error> {
         // Decode the incoming transaction
         let tx = SignedTransaction::decode(&raw_tx[..])?;
 
@@ -151,17 +157,21 @@ impl Node {
         }
 
         // If this is a check_tx and a validation handler has been set, run it
-        if is_check && self.validate_tx_handler.is_some() {
+        if is_check {
             let snap = self.db.snapshot();
             let mut cache = store::StoreView::wrap(&snap, self.check_cache.take().unwrap());
 
-            let resp = match self.validate_tx_handler {
-                Some(handler) => match handler(&tx, &mut cache) {
-                    Ok(()) => Ok(RepeatedField::<Event>::new()),
-                    Err(r) => Err(r),
-                },
-                None => Ok(RepeatedField::new()),
+            let resp = match self.authenticator.validate(&tx, &cache) {
+                Ok(()) => Ok(RepeatedField::<Event>::new()),
+                Err(r) => Err(r),
             };
+
+            // Increment the nonce for a sender in the checkTx cache
+            ensure!(
+                self.authenticator.increment_nonce(&tx, &mut cache).is_ok(),
+                "check tx nonce error"
+            );
+
             self.check_cache.replace(cache.into_cache());
             return resp;
         }
@@ -171,8 +181,6 @@ impl Node {
         let snap = self.db.snapshot();
         let mut cache = store::StoreView::wrap(&snap, self.deliver_cache.take().unwrap());
 
-        // TODO: Increment account nonce
-
         let ctx = tx.into_context();
         let resp = match app.handle_tx(&ctx, &mut cache) {
             Ok(()) => {
@@ -181,6 +189,12 @@ impl Node {
             }
             Err(r) => Err(r),
         };
+
+        // Increment the nonce for a sender
+        ensure!(
+            self.authenticator.increment_nonce(&tx, &mut cache).is_ok(),
+            "deliver tx nonce error"
+        );
 
         self.deliver_cache.replace(cache.into_cache());
         resp

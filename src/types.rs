@@ -9,6 +9,8 @@ use protobuf::RepeatedField;
 
 use crate::store::StoreView;
 
+pub type AccountId = String;
+
 pub struct EventManager {
     pub appname: String,
     events: Vec<Event>,
@@ -48,7 +50,7 @@ impl EventManager {
 }
 
 pub struct Context {
-    pub sender: Vec<u8>,
+    pub sender: AccountId,
     pub msg: Vec<u8>,
     event_manager: RefCell<EventManager>,
 }
@@ -83,8 +85,32 @@ impl Context {
 /// from the Tendermint memory pool. Note: it only provides read-only
 /// access to storage. Validation checks should be limited to
 /// checking signatures or other read-only operations.
-pub type AuthenticationHandler =
-    fn(tx: &SignedTransaction, view: &mut StoreView) -> Result<(), anyhow::Error>;
+//pub type AuthenticationHandler =
+//    fn(tx: &SignedTransaction, view: &mut StoreView) -> Result<(), anyhow::Error>;
+
+/// Implement this type for the abci checkTx handler.  This function should
+/// contain the logic to determine whether to accept or reject transactions
+/// from the Tendermint memory pool. Note: it only provides read-only
+/// access to storage. Validation checks should be limited to
+/// checking signatures or other read-only operations.
+pub trait Authenticator: Sync + Send + 'static {
+    /// Validate an incoming transaction to determine whether is should be included
+    /// in the tx mempool.
+    fn validate(
+        &self,
+        tx: &SignedTransaction,
+        view: &StoreView,
+    ) -> anyhow::Result<(), anyhow::Error>;
+
+    /// Implement this function to increment the nonce of the caller.
+    fn increment_nonce(
+        &self,
+        _tx: &SignedTransaction,
+        _view: &mut StoreView,
+    ) -> anyhow::Result<(), anyhow::Error> {
+        Ok(())
+    }
+}
 
 pub trait AppModule: Sync + Send + 'static {
     /// The routing name of the service. This cooresponds to the route field in a SignedTransaction.
@@ -126,7 +152,7 @@ where
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct SignedTransaction {
     /// The id of the sender/signer of the transaction
-    sender: Vec<u8>,
+    sender: AccountId,
     /// The name of the app to call
     app: String,
     /// The encoded bits of the enclosed message
@@ -139,13 +165,13 @@ pub struct SignedTransaction {
 
 impl SignedTransaction {
     /// Create a new SignedTransaction
-    pub fn create<M>(sender: Vec<u8>, app: &'static str, msg: M, nonce: u64) -> Self
+    pub fn create<S: Into<AccountId>, M>(sender: S, app: &'static str, msg: M, nonce: u64) -> Self
     where
         M: BorshSerialize + BorshDeserialize,
     {
         let payload = msg.try_to_vec().unwrap();
         Self {
-            sender,
+            sender: sender.into(),
             app: String::from(app),
             msg: payload,
             nonce,
@@ -157,7 +183,7 @@ impl SignedTransaction {
         &*self.app
     }
 
-    pub fn sender(&self) -> Vec<u8> {
+    pub fn sender(&self) -> String {
         self.sender.clone()
     }
 
@@ -196,7 +222,7 @@ impl SignedTransaction {
     fn hash(&self) -> Hash {
         // Hash order: sender, appname, msgid, msg
         let contents: Vec<u8> = vec![
-            self.sender.clone(),
+            self.sender.as_bytes().to_vec(),
             self.app.as_bytes().to_vec(),
             self.msg.clone(),
         ]

@@ -3,7 +3,6 @@ use anyhow::bail;
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_merkledb::{BinaryValue, TemporaryDB};
 use std::sync::Arc;
-use std::{borrow::Cow, convert::AsRef};
 
 #[macro_use]
 extern crate rapido;
@@ -106,7 +105,7 @@ fn query_random() -> Result<Vec<u8>, anyhow::Error> {
 // Helpers
 fn create_person_tx(name: String, age: u8) -> RequestDeliverTx {
     let msg = Msgs::CreatePerson(name, age);
-    let tx = SignedTransaction::create([0u8; 10].to_vec(), "person_app", msg, 0u64);
+    let tx = SignedTransaction::create("dave", "person_app", msg, 0u64);
     let mut req = RequestDeliverTx::new();
     req.set_tx(tx.encode());
     req
