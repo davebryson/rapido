@@ -3,13 +3,6 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{hash, KeyPair, PublicKey, Seed};
 use rapido_core::{AccountId, Store, StoreView};
 
-//use crate::types::AccountId;
-
-//pub mod dev;
-//pub mod handler;
-
-//pub use self::handler::authenticate;
-
 #[macro_use]
 extern crate rapido_core;
 

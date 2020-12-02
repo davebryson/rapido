@@ -10,6 +10,6 @@ anyhow = "1.0.34"
 borsh = "0.7.1"
 bs58 = "0.4.0"
 hex = "0.4.0"
-rapido-core = {path = "../../core"}
+rapido-core = {version = "0.3.0", path = "../../core"}
 exonum-crypto = "1.0.0"
 exonum-merkledb = "1.0.0"
