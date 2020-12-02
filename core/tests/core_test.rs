@@ -42,7 +42,7 @@ impl AppModule for PersonHandler {
 
     fn handle_tx(&self, ctx: &Context, cache: &mut StoreView) -> Result<(), anyhow::Error> {
         // Use the payload vs msgid
-        let msg: Msgs = ctx.decode_msg();
+        let msg: Msgs = ctx.decode_msg()?;
         match msg {
             Msgs::CreatePerson(name, age) => {
                 let store = MyStore {};

@@ -6,7 +6,7 @@
 //! For demo purposes, Txs don't need to be signed.
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use rapido_core::{AppModule, Context, Store, StoreView};
+use rapido_core::{AccountId, AppModule, Context, Store, StoreView};
 
 #[macro_use]
 extern crate rapido_core;
@@ -47,7 +47,7 @@ impl_store_values!(Counter);
 pub struct CounterStore;
 impl Store for CounterStore {
     // The key for the store.  Counter name
-    type Key = String;
+    type Key = AccountId;
     // The actual value stored
     type Value = Counter;
 
@@ -76,17 +76,15 @@ impl AppModule for CounterHandler {
     }
 
     fn handle_tx(&self, ctx: &Context, view: &mut StoreView) -> Result<(), anyhow::Error> {
-        let msg: Msgs = ctx.decode_msg();
+        let msg: Msgs = ctx.decode_msg()?;
         let store = CounterStore {};
         debug!("counter: handle tx!");
 
         match msg {
             Msgs::Create(name) => {
-                ensure!(
-                    store.get(name.clone(), view).is_none(),
-                    "User already exists"
-                );
-                store.put(name, Counter::default(), view);
+                let n = name.as_bytes().to_vec();
+                ensure!(store.get(n.clone(), view).is_none(), "User already exists");
+                store.put(n, Counter::default(), view);
                 Ok(())
             }
             Msgs::Add(val) => {
@@ -115,14 +113,14 @@ impl AppModule for CounterHandler {
         key: Vec<u8>,
         view: &StoreView,
     ) -> Result<Vec<u8>, anyhow::Error> {
-        let account = String::from_utf8(key);
-        ensure!(account.is_ok(), "Error parsing the query key!");
+        let account = key;
+        //ensure!(account.is_ok(), "Error parsing the query key!");
         let store = CounterStore {};
-        let user = account.unwrap();
+        //let user = account.unwrap();
         match path {
-            "/" => match store.get(user.clone(), view) {
+            "/" => match store.get(account.clone(), view) {
                 Some(c) => Ok(c.try_to_vec().unwrap()),
-                None => bail!("not count found for: {:}", user),
+                None => bail!("not count found for the given user"),
             },
             _ => bail!("nothing else to see here..."),
         }

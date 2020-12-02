@@ -1,3 +1,4 @@
+/*
 use anyhow::bail;
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{hash, KeyPair, PublicKey, Seed};
@@ -123,6 +124,7 @@ pub fn increment_nonce<I: Into<String>>(id: I, view: &mut StoreView) -> Result<(
         _ => bail!("Account not found"),
     }
 }
+*/
 
 #[cfg(test)]
 mod tests {
