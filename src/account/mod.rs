@@ -6,7 +6,7 @@ use exonum_crypto::PublicKey;
 use crate::types::AccountId;
 
 pub mod dev;
-pub mod handler;
+//pub mod handler;
 
 //pub use self::handler::authenticate;
 

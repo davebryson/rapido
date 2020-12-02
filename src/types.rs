@@ -122,7 +122,7 @@ pub trait AppModule: Sync + Send + 'static {
     /// initial state for your application. Provides a borrowed view of genesis data
     /// for each application to process as needed.
     // TODO: Add validator info, and chain_id
-    fn initialize(&self, _fork: &Fork, _data: Option<&Vec<u8>>) -> Result<(), anyhow::Error> {
+    fn initialize(&self, _view: &mut StoreView) -> Result<(), anyhow::Error> {
         Ok(())
     }
 
@@ -255,5 +255,34 @@ pub fn verify_tx_signature(tx: &SignedTransaction, public_key: &PublicKey) -> bo
     match Signature::from_slice(&tx.signature[..]) {
         Some(signature) => exonum_crypto::verify(&signature, &hashed[..], public_key),
         None => false,
+    }
+}
+
+mod tests {
+    use super::*;
+    use exonum_crypto::gen_keypair;
+
+    #[test]
+    fn test_tx() {
+        #[derive(BorshDeserialize, BorshSerialize, PartialEq, Debug)]
+        enum Message {
+            Add(u16),
+            Send(String),
+        }
+
+        let accountid = "dave";
+        let (pk, sk) = gen_keypair();
+        let mut tx =
+            SignedTransaction::create(accountid.clone(), "example", Message::Add(10u16), 1u64);
+        tx.sign(&sk);
+        let encoded = tx.encode();
+
+        let back = SignedTransaction::decode(&encoded).unwrap();
+        assert!(verify_tx_signature(&back, &pk));
+
+        let ctx = back.into_context();
+        assert_eq!(Message::Add(10u16), ctx.decode_msg());
+        assert_eq!(accountid, ctx.sender);
+        assert_eq!("example", back.appname());
     }
 }

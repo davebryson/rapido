@@ -40,7 +40,6 @@ pub struct AppBuilder {
     pub db: Arc<dyn Database>,
     pub appmodules: Vec<Box<dyn AppModule>>,
     pub validate_tx_handler: Option<Box<dyn Authenticator>>,
-    pub genesis_data: Option<Vec<u8>>,
 }
 
 impl AppBuilder {
@@ -50,18 +49,7 @@ impl AppBuilder {
             db,
             appmodules: Vec::new(),
             validate_tx_handler: None,
-            genesis_data: None,
         }
-    }
-
-    /// Set genesis data to be used on initial startup. How the data
-    /// is interpreted is left to the Service implementation
-    // TODO: Change this
-    pub fn with_genesis_data(mut self, data: Vec<u8>) -> Self {
-        if data.len() > 0 {
-            self.genesis_data = Some(data);
-        }
-        self
     }
 
     /// Set the desired validation handler. If not set, checkTx will return 'ok' by default
@@ -100,7 +88,6 @@ pub struct Node {
     db: Arc<dyn Database>,
     appmodules: HashMap<&'static str, Box<dyn AppModule>>,
     authenticator: Box<dyn Authenticator>,
-    genesis_data: Option<Vec<u8>>,
     check_cache: Option<store::Cache>,
     deliver_cache: Option<store::Cache>,
 }
@@ -133,7 +120,6 @@ impl Node {
             db: db.clone(),
             appmodules: service_map,
             authenticator: auth,
-            genesis_data: config.genesis_data,
             check_cache: Some(Default::default()),
             deliver_cache: Some(Default::default()),
         }
@@ -200,7 +186,7 @@ impl Node {
         resp
     }
 
-    // Called in abci.commit
+    // Called by abci.commit
     fn update_state(&mut self, fork: &Fork) -> Vec<u8> {
         let aggregator = SystemSchema::new(fork).state_aggregator();
         let statehash = aggregator.object_hash().as_bytes().to_vec();
@@ -251,25 +237,22 @@ impl abci::Application for Node {
         resp
     }
 
-    // Ran once on the initial start of the application
-    // How to use config like substrate here...?
-    // TODO:  Doesn't init_chain call commit?!  If so,
-    // Change this to use storeview
+    // Ran once on the initial start of the application.
+    // AppModules can implement `initialize` to load initial state.
     fn init_chain(&mut self, _req: &RequestInitChain) -> ResponseInitChain {
-        // a little clunky, but only done once
+        let snap = self.db.snapshot();
+        let mut cache = store::StoreView::wrap(&snap, self.deliver_cache.take().unwrap());
+
         for (_, app) in &self.appmodules {
-            let fork = self.db.fork();
-            let result = app.initialize(&fork, self.genesis_data.as_ref());
+            let result = app.initialize(&mut cache);
 
             if result.is_err() {
                 panic!("problem initializing chain with genesis data");
             }
-
-            if let Err(_) = self.db.merge(fork.into_patch()) {
-                panic!("error");
-            }
         }
-        // THIS SHOULD RETURN INITIAL APP HASH!
+
+        // TODO: Put validators in state
+        self.deliver_cache.replace(cache.into_cache());
         ResponseInitChain::new()
     }
 
@@ -283,7 +266,7 @@ impl abci::Application for Node {
             None => {
                 response.code = 1u32;
                 response.key = req.data.clone();
-                response.log = "malformed query path".into();
+                response.log = "Malformed query path".into();
                 return response;
             }
         };
@@ -356,7 +339,7 @@ impl abci::Application for Node {
     }
 
     fn end_block(&mut self, _req: &RequestEndBlock) -> ResponseEndBlock {
-        // Should do validator updates
+        // do validator updates
         ResponseEndBlock::new()
     }
 
