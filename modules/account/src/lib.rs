@@ -1,14 +1,17 @@
-use super::{Store, StoreView};
 use anyhow::bail;
 use borsh::{BorshDeserialize, BorshSerialize};
-use exonum_crypto::PublicKey;
+use exonum_crypto::{hash, KeyPair, PublicKey, Seed};
+use rapido_core::{AccountId, Store, StoreView};
 
-use crate::types::AccountId;
+//use crate::types::AccountId;
 
-pub mod dev;
+//pub mod dev;
 //pub mod handler;
 
 //pub use self::handler::authenticate;
+
+#[macro_use]
+extern crate rapido_core;
 
 const PUBKEY_SIZE: usize = 32;
 
@@ -18,6 +21,21 @@ pub fn generate_did(pk: PublicKey) -> String {
     let identifer =
         bs58::encode(exonum_crypto::hash(&pk.as_bytes()[..]).as_bytes().to_vec()).into_string();
     format!("did:rapido:{}", identifer)
+}
+
+fn generator(v: &str) -> Account {
+    let pair = create_keypair(v);
+    Account::create(pair.public_key())
+}
+
+pub fn create_keypair(v: &str) -> KeyPair {
+    let seed = Seed::new(hash(v.as_bytes()).as_bytes());
+    KeyPair::from_seed(&seed)
+}
+
+/// Return a list of Accounts to use for testing/development
+pub fn generate_dev_accounts() -> Vec<Account> {
+    vec![generator("/Dave"), generator("/Bob"), generator("/Alice")]
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Debug, PartialEq, Clone)]
@@ -110,5 +128,13 @@ pub fn increment_nonce<I: Into<String>>(id: I, view: &mut StoreView) -> Result<(
             Ok(())
         }
         _ => bail!("Account not found"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() {
+        assert_eq!(2 + 2, 4);
     }
 }

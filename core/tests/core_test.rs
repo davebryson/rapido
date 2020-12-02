@@ -2,9 +2,9 @@ use anyhow::bail;
 use borsh::{BorshDeserialize, BorshSerialize};
 
 #[macro_use]
-extern crate rapido;
+extern crate rapido_core;
 
-use rapido::{AppBuilder, AppModule, Context, SignedTransaction, Store, StoreView, TestKit};
+use rapido_core::{AppBuilder, AppModule, Context, SignedTransaction, Store, StoreView, TestKit};
 
 // Model
 #[derive(Debug, Clone, PartialEq, BorshSerialize, BorshDeserialize, Default)]

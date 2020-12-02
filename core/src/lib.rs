@@ -8,9 +8,7 @@
 
 #[macro_use]
 mod macros;
-pub mod account;
 mod auth;
-pub mod client;
 mod schema;
 mod store;
 mod testkit;
@@ -32,7 +30,8 @@ pub use self::{
     store::{Store, StoreView},
     testkit::TestKit,
     types::{
-        sign_transaction, verify_tx_signature, AppModule, Authenticator, Context, SignedTransaction,
+        sign_transaction, verify_tx_signature, AccountId, AppModule, Authenticator, Context,
+        SignedTransaction,
     },
 };
 

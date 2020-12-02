@@ -1,0 +1,15 @@
+[package]
+name = "rapido-account"
+version = "0.1.0"
+authors = ["Dave Bryson <daveb@miceda.org>"]
+edition = "2018"
+
+
+[dependencies]
+anyhow = "1.0.34"
+borsh = "0.7.1"
+bs58 = "0.4.0"
+hex = "0.4.0"
+rapido-core = {path = "../../core"}
+exonum-crypto = "1.0.0"
+exonum-merkledb = "1.0.0"

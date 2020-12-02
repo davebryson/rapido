@@ -1,0 +1,25 @@
+[package]
+name = "counter"
+version = "0.1.0"
+authors = ["Dave Bryson <daveb@miceda.org>"]
+edition = "2018"
+
+[dependencies]
+anyhow = "1.0.34"
+borsh = "0.7.1"
+exonum-crypto = "1.0.0"
+exonum-merkledb = "1.0.0"
+log = "0.4.8"
+rapido-core = {version = "0.3.0", path = "../../core"}
+rapido-client = {version = "0.3.0", path = "../../client"}
+structopt = "0.3.21"
+tendermint-rpc = { version = "0.17.0-rc3", features = ["http-client"]}
+tokio = "0.2"
+
+[[bin]]
+name = "counterapp"
+path = "src/bin/app.rs"
+
+[[bin]]
+name = "cli"
+path = "src/bin/cli.rs"

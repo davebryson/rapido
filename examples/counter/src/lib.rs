@@ -6,15 +6,15 @@
 //! For demo purposes, Txs don't need to be signed.
 
 use borsh::{BorshDeserialize, BorshSerialize};
-use rapido::{AppBuilder, AppModule, Context, Store, StoreView};
+use rapido_core::{AppModule, Context, Store, StoreView};
 
 #[macro_use]
-extern crate rapido;
+extern crate rapido_core;
 
 #[macro_use]
 extern crate log;
 
-const APP_NAME: &'static str = "counter.app";
+pub const APP_NAME: &'static str = "counter.app";
 
 /// Model for the counter.  This is stored in the Merkle Tree
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Default)]
@@ -129,7 +129,10 @@ impl AppModule for CounterHandler {
     }
 }
 
-// run: cargo run --bin counterapp
-fn main() {
-    AppBuilder::new().with_app(CounterHandler {}).run();
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn it_works() {
+        assert_eq!(2 + 2, 4);
+    }
 }

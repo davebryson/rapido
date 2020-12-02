@@ -1,3 +1,4 @@
+
 //! RPC helper functions to interact with a Tendermint node.
 //! Currently supports sending transactions and querying the app.
 use std::str::FromStr;
@@ -7,7 +8,7 @@ use anyhow::ensure;
 use tendermint::abci::Transaction;
 use tendermint_rpc::{endpoint::broadcast, Client, HttpClient};
 
-use crate::SignedTransaction;
+use rapido_core::SignedTransaction;
 
 fn parse_tx_commit_response(resp: broadcast::tx_commit::Response) -> Result<String, anyhow::Error> {
     ensure!(

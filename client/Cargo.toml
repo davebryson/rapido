@@ -1,0 +1,15 @@
+[package]
+name = "rapido-client"
+version = "0.3.0"
+authors = ["Dave Bryson <daveb@miceda.org>"]
+edition = "2018"
+keywords = ["tendermint", "blockchain", "abci"]
+description = "A simple Rust client for Rapido Tendermint applications"
+
+[dependencies]
+anyhow = "1.0.34"
+rapido-core = {version = "0.3.0", path = "../core"}
+structopt = "0.3.21"
+tendermint = "0.17.0-rc3"
+tendermint-rpc = { version = "0.17.0-rc3", features = ["http-client"]}
+tokio = "0.2"

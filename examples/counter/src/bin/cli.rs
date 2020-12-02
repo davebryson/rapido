@@ -1,19 +1,10 @@
-//! Counter application that's simple and demonstrates Rapido functionality.
-//! User's can maintain a counter in a state store.
-//! A user account (tx.sender) is just a 'name'.  So:
-//! name => Counter{}
-//! User's can increase and decrease their Counters and check the current count.
-//! For demo purposes, Txs don't need to be signed.
-
 use borsh::{BorshDeserialize, BorshSerialize};
-use rapido::{
-    client::{query, send_transaction_commit},
-    SignedTransaction,
-};
+use rapido_client::{query, send_transaction_commit};
+use rapido_core::SignedTransaction;
+
+use counter::{Msgs, APP_NAME};
 use structopt::StructOpt;
 use tendermint_rpc::HttpClient;
-
-const APP_NAME: &'static str = "counter.app";
 
 /// Model for the counter.  This is stored in the Merkle Tree
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Default)]
@@ -38,13 +29,6 @@ impl Counter {
         format!("{:x}", self.count)
     }
 }
-#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
-pub enum Msgs {
-    Create(String),
-    Add(u16),
-    Subtract(u16),
-}
-
 // Create, Add, Sub, query
 // run app
 // Client CLI
