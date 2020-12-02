@@ -260,14 +260,14 @@ pub fn verify_tx_signature(tx: &SignedTransaction, public_key: &PublicKey) -> bo
 mod tests {
     use super::*;
 
+    #[derive(BorshDeserialize, BorshSerialize, PartialEq, Debug)]
+    enum Message {
+        Add(u16),
+        Send(String),
+    }
+
     #[test]
     fn test_tx() {
-        #[derive(BorshDeserialize, BorshSerialize, PartialEq, Debug)]
-        enum Message {
-            Add(u16),
-            Send(String),
-        }
-
         let accountid = "dave";
         let (pk, sk) = exonum_crypto::gen_keypair();
         let mut tx =
