@@ -1,13 +1,11 @@
 use abci::*;
 use anyhow::bail;
 use borsh::{BorshDeserialize, BorshSerialize};
-use exonum_merkledb::{BinaryValue, TemporaryDB};
-use std::sync::Arc;
 
 #[macro_use]
 extern crate rapido;
 
-use rapido::{AppBuilder, AppModule, Context, SignedTransaction, Store, StoreView};
+use rapido::{AppBuilder, AppModule, Context, SignedTransaction, Store, StoreView, TestKit};
 
 // Model
 #[derive(Debug, Clone, PartialEq, BorshSerialize, BorshDeserialize, Default)]
@@ -93,7 +91,7 @@ impl AppModule for PersonHandler {
 fn get_person(key: String, view: &StoreView) -> Result<Vec<u8>, anyhow::Error> {
     let store = MyStore {};
     match store.query(key, view) {
-        Some(p) => Ok(p.to_bytes()),
+        Some(p) => Ok(p.try_to_vec().unwrap()),
         None => bail!("person not found"),
     }
 }
@@ -122,9 +120,34 @@ fn run_batch(node: &mut rapido::Node, data: Vec<&str>) {
 }
 
 #[test]
+fn test_with_testkit() {
+    let mut tester = TestKit::create(AppBuilder::new().with_app(PersonHandler {}));
+    tester.start();
+
+    let tx1 = SignedTransaction::create(
+        "dave",
+        "person_app",
+        Msgs::CreatePerson("bob".into(), 1),
+        0u64,
+    );
+
+    assert!(tester.check_tx(&tx1).is_ok());
+    assert!(tester.commit_tx(&tx1).is_ok());
+
+    let qr = tester
+        .query("person_app", "bob".as_bytes().to_vec())
+        .unwrap();
+    let p = Person::try_from_slice(&qr[..]).unwrap();
+    assert_eq!("bob", p.name);
+
+    assert!(tester
+        .query("person_app", "will_fail".as_bytes().to_vec())
+        .is_err());
+}
+
+#[test]
 fn test_basics() {
-    let db = Arc::new(TemporaryDB::new());
-    let mut node = AppBuilder::new(db).with_app(PersonHandler {}).finish();
+    let mut node = AppBuilder::new().with_app(PersonHandler {}).node();
 
     let test_accounts = vec!["a", "b", "c", "d", "e", "f"];
 

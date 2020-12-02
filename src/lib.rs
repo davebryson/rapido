@@ -13,20 +13,24 @@ mod auth;
 pub mod client;
 mod schema;
 mod store;
+pub mod testkit;
 mod types;
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::schema::RapidoSchema;
 use abci::*;
 use anyhow::{bail, ensure};
-use exonum_merkledb::{Database, Fork, ObjectHash, SystemSchema};
+use env_logger::Env;
+use exonum_merkledb::{Database, DbOptions, Fork, ObjectHash, RocksDB, SystemSchema, TemporaryDB};
 use protobuf::RepeatedField;
 
 // Re-export
 pub use self::{
     store::{Store, StoreView},
+    testkit::TestKit,
     types::{
         sign_transaction, verify_tx_signature, AppModule, Authenticator, Context, SignedTransaction,
     },
@@ -34,22 +38,37 @@ pub use self::{
 
 const NAME: &str = "rapido_v2";
 const RESERVED_APP_NAME: &str = "rapido";
+const RAPIDO_HOME: &str = ".rapido";
+const RAPIDO_STATE_DIR: &str = "state";
+
+fn dbdir() -> PathBuf {
+    let mut dir = dirs::home_dir().expect("find home dir");
+    dir.push(RAPIDO_HOME);
+    dir.push(RAPIDO_STATE_DIR);
+    dir
+}
 
 /// Use the AppBuilder to assemble an application
 pub struct AppBuilder {
-    pub db: Arc<dyn Database>,
-    pub appmodules: Vec<Box<dyn AppModule>>,
-    pub validate_tx_handler: Option<Box<dyn Authenticator>>,
+    db: Arc<dyn Database>,
+    appmodules: Vec<Box<dyn AppModule>>,
+    validate_tx_handler: Option<Box<dyn Authenticator>>,
+    use_rocks_db: bool,
 }
 
 impl AppBuilder {
-    /// Create a new builder with the given Database handle from exonum_merkledb
-    pub fn new(db: Arc<dyn Database>) -> Self {
+    pub fn new() -> Self {
         Self {
-            db,
+            db: Arc::new(TemporaryDB::new()),
             appmodules: Vec::new(),
             validate_tx_handler: None,
+            use_rocks_db: false,
         }
+    }
+
+    pub fn use_production_db(mut self) -> Self {
+        self.use_rocks_db = true;
+        self
     }
 
     /// Set the desired validation handler. If not set, checkTx will return 'ok' by default
@@ -63,20 +82,29 @@ impl AppBuilder {
         self
     }
 
-    /// Call to return a configured node. This consumes the underlying builder.
-    /// Will panic if no appmodules are set.
-    pub fn finish(self) -> Node {
+    /// Call to return a configured node with a Temp/in-memory db
+    /// Use to directly interact with ABCI calls during development
+    pub fn node(self) -> Node {
         if self.appmodules.len() == 0 {
             panic!("No appmodules configured!");
         }
         Node::new(self)
     }
 
-    // Run node on localhost
-    pub fn run(self) {
+    pub fn run(mut self) {
+        env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+            .try_init()
+            .expect("logger");
+
         if self.appmodules.len() == 0 {
             panic!("No appmodules configured!");
         }
+
+        if self.use_rocks_db {
+            let db = RocksDB::open(dbdir(), &DbOptions::default()).expect("create rocks db");
+            self.db = Arc::new(db);
+        }
+
         let node = Node::new(self);
         abci::run_local(node);
     }
@@ -271,6 +299,13 @@ impl abci::Application for Node {
             }
         };
 
+        let snapshot = self.db.snapshot();
+        let cache = store::StoreView::wrap_snapshot(&snapshot);
+
+        // TODO: Add rapdio queries:
+        // /rapido/apphash
+        // /rapido/validators
+
         // Check if a app exists for this name
         if !self.appmodules.contains_key(appname) {
             response.code = 1u32;
@@ -279,8 +314,6 @@ impl abci::Application for Node {
         }
 
         // Call handle_query
-        let snapshot = self.db.snapshot();
-        let cache = store::StoreView::wrap_snapshot(&snapshot);
         match self
             .appmodules
             .get(appname)

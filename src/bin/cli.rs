@@ -61,7 +61,7 @@ fn get_client() -> HttpClient {
     HttpClient::new("tcp://127.0.0.1:26657".parse().unwrap()).unwrap()
 }
 
-// run: cargo run --example counter create dave
+// run: cargo run --bin cli create dave
 #[tokio::main]
 async fn main() {
     let opts = CounterAppCommands::from_args();

@@ -4,7 +4,6 @@ use abci::{Event, Pair};
 use anyhow::{anyhow, Result};
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{Hash, PublicKey, SecretKey, Signature};
-use exonum_merkledb::Fork;
 use protobuf::RepeatedField;
 
 use crate::store::StoreView;
@@ -260,7 +259,6 @@ pub fn verify_tx_signature(tx: &SignedTransaction, public_key: &PublicKey) -> bo
 
 mod tests {
     use super::*;
-    use exonum_crypto::gen_keypair;
 
     #[test]
     fn test_tx() {
@@ -271,7 +269,7 @@ mod tests {
         }
 
         let accountid = "dave";
-        let (pk, sk) = gen_keypair();
+        let (pk, sk) = exonum_crypto::gen_keypair();
         let mut tx =
             SignedTransaction::create(accountid.clone(), "example", Message::Add(10u16), 1u64);
         tx.sign(&sk);

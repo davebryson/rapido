@@ -5,14 +5,14 @@
 //! User's can increase and decrease their Counters and check the current count.
 //! For demo purposes, Txs don't need to be signed.
 
-use std::sync::Arc;
-
 use borsh::{BorshDeserialize, BorshSerialize};
-use exonum_merkledb::TemporaryDB;
 use rapido::{AppBuilder, AppModule, Context, Store, StoreView};
 
 #[macro_use]
 extern crate rapido;
+
+#[macro_use]
+extern crate log;
 
 const APP_NAME: &'static str = "counter.app";
 
@@ -70,9 +70,16 @@ impl AppModule for CounterHandler {
         APP_NAME
     }
 
+    fn initialize(&self, _view: &mut StoreView) -> Result<(), anyhow::Error> {
+        debug!("counter run init");
+        Ok(())
+    }
+
     fn handle_tx(&self, ctx: &Context, view: &mut StoreView) -> Result<(), anyhow::Error> {
         let msg: Msgs = ctx.decode_msg();
         let store = CounterStore {};
+        debug!("counter: handle tx!");
+
         match msg {
             Msgs::Create(name) => {
                 ensure!(
@@ -122,9 +129,7 @@ impl AppModule for CounterHandler {
     }
 }
 
-// run: cargo run --example counter create dave
+// run: cargo run --bin counterapp
 fn main() {
-    let db = Arc::new(TemporaryDB::new());
-    let app = AppBuilder::new(db);
-    app.with_app(CounterHandler {}).run()
+    AppBuilder::new().with_app(CounterHandler {}).run();
 }

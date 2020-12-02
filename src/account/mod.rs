@@ -1,5 +1,5 @@
 use super::{Store, StoreView};
-use anyhow::{bail, ensure};
+use anyhow::bail;
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::PublicKey;
 
