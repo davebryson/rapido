@@ -13,7 +13,7 @@ mod auth;
 pub mod client;
 mod schema;
 mod store;
-pub mod testkit;
+mod testkit;
 mod types;
 
 use std::collections::HashMap;
@@ -36,7 +36,7 @@ pub use self::{
     },
 };
 
-const NAME: &str = "rapido_v2";
+const NAME: &str = "rapido_v3";
 const RESERVED_APP_NAME: &str = "rapido";
 const RAPIDO_HOME: &str = ".rapido";
 const RAPIDO_STATE_DIR: &str = "state";
