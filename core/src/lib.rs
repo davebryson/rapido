@@ -130,7 +130,7 @@ impl Authenticator for DefaultAuthenticator {
 /// You should use the `AppBuilder` to create a Node.
 pub struct Node {
     db: Arc<dyn Database>,
-    appmodules: HashMap<&'static str, Box<dyn AppModule>>,
+    appmodules: HashMap<String, Box<dyn AppModule>>,
     authenticator: Box<dyn Authenticator>,
     check_cache: Option<store::Cache>,
     deliver_cache: Option<store::Cache>,
@@ -150,7 +150,7 @@ impl Node {
                 panic!("Cannot use app module with the name of 'rapido'. The name is reserved");
             }
             // First come, first serve...
-            if !service_map.contains_key(route) {
+            if !service_map.contains_key(&route) {
                 service_map.insert(route, s);
             }
         }

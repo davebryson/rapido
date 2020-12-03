@@ -1,5 +1,5 @@
-
-//! RPC helper functions to interact with a Tendermint node.
+//! Simple RPC helper functions to interact with a Tendermint node.
+//! ideal for command line applications.
 //! Currently supports sending transactions and querying the app.
 use std::str::FromStr;
 

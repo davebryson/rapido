@@ -14,7 +14,7 @@ extern crate rapido_core;
 #[macro_use]
 extern crate log;
 
-pub const APP_NAME: &'static str = "counter.app";
+pub const APP_NAME: &'static str = "example.counter.app";
 
 /// Model for the counter.  This is stored in the Merkle Tree
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Default)]
@@ -66,8 +66,8 @@ pub enum Msgs {
 
 pub struct CounterHandler;
 impl AppModule for CounterHandler {
-    fn name(&self) -> &'static str {
-        APP_NAME
+    fn name(&self) -> String {
+        APP_NAME.into()
     }
 
     fn initialize(&self, _view: &mut StoreView) -> Result<(), anyhow::Error> {
@@ -114,9 +114,7 @@ impl AppModule for CounterHandler {
         view: &StoreView,
     ) -> Result<Vec<u8>, anyhow::Error> {
         let account = key;
-        //ensure!(account.is_ok(), "Error parsing the query key!");
         let store = CounterStore {};
-        //let user = account.unwrap();
         match path {
             "/" => match store.get(account.clone(), view) {
                 Some(c) => Ok(c.try_to_vec().unwrap()),

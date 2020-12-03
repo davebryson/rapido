@@ -162,12 +162,22 @@ pub trait Authenticator: Sync + Send + 'static {
     }
 }
 
+// Convert an AppModule in Box<App>
+impl<T> From<T> for Box<dyn Authenticator>
+where
+    T: Authenticator,
+{
+    fn from(factory: T) -> Self {
+        Box::new(factory) as Self
+    }
+}
+
 /// Main trait to implement the core logic of your application.
 pub trait AppModule: Sync + Send + 'static {
     /// This should return a application wide unique name for your application.
     /// The name used here will be used as the name of the `app` in a SignedTransaction
     /// And used to route txs to your AppModule.
-    fn name(&self) -> &'static str;
+    fn name(&self) -> String;
 
     /// Called on the initial start-up of the application. Can be used to establish
     /// initial state of your application. The data processed here should be passed
