@@ -1,3 +1,6 @@
+//!
+//! Basic accounts with an authenticator.
+//!
 use anyhow::{bail, ensure};
 use borsh::{BorshDeserialize, BorshSerialize};
 use exonum_crypto::{hash, PublicKey, PUBLIC_KEY_LENGTH};

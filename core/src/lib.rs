@@ -147,7 +147,7 @@ impl Node {
             let route = s.name();
             // Rapido is a reserved app/route name
             if route == RESERVED_APP_NAME {
-                panic!("Cannot use app module with the name of 'rapido'. The name is reserved");
+                panic!("The AppModule name 'rapido' is reserved for internal use");
             }
             // First come, first serve...
             if !service_map.contains_key(&route) {

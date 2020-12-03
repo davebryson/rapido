@@ -39,7 +39,7 @@ impl Context {
 
     /// get the tx sender
     pub fn sender(&self) -> AccountId {
-        /// Hmmm... this is ugly
+        // Hmmm... this is ugly
         self.sender.clone()
     }
 
