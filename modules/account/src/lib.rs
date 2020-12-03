@@ -1,135 +1,313 @@
-/*
-use anyhow::bail;
+use anyhow::{bail, ensure};
 use borsh::{BorshDeserialize, BorshSerialize};
-use exonum_crypto::{hash, KeyPair, PublicKey, Seed};
-use rapido_core::{AccountId, Store, StoreView};
+use exonum_crypto::{hash, PublicKey, PUBLIC_KEY_LENGTH};
+use rapido_core::{
+    verify_tx_signature, AccountId, AppModule, Authenticator, Context, SignedTransaction, Store,
+    StoreView,
+};
 
 #[macro_use]
 extern crate rapido_core;
 
-const PUBKEY_SIZE: usize = 32;
+const ACCOUNT_APP_NAME: &str = "rapidoaccount";
+const ACCOUNT_STORE_NAME: &str = "rapido.account.store";
 
-pub type PubKeyBytes = [u8; PUBKEY_SIZE];
+pub type PublicKeyBytes = [u8; PUBLIC_KEY_LENGTH];
 
-pub fn generate_did(pk: PublicKey) -> String {
-    let identifer =
-        bs58::encode(exonum_crypto::hash(&pk.as_bytes()[..]).as_bytes().to_vec()).into_string();
-    format!("did:rapido:{}", identifer)
+// base58(hash(pubkey))
+fn generate_account_id(pk: &PublicKey) -> Vec<u8> {
+    let hash = hash(&pk.as_bytes());
+    bs58::encode(&hash.as_bytes()).into_vec()
 }
 
-fn generator(v: &str) -> Account {
-    let pair = create_keypair(v);
-    Account::create(pair.public_key())
-}
-
-pub fn create_keypair(v: &str) -> KeyPair {
-    let seed = Seed::new(hash(v.as_bytes()).as_bytes());
-    KeyPair::from_seed(&seed)
-}
-
-/// Return a list of Accounts to use for testing/development
-pub fn generate_dev_accounts() -> Vec<Account> {
-    vec![generator("/Dave"), generator("/Bob"), generator("/Alice")]
-}
-
+/// Account Model
 #[derive(BorshDeserialize, BorshSerialize, Debug, PartialEq, Clone)]
 pub struct Account {
-    id: AccountId, // base58(hash(pubkey)))
-    nonce: u64,
-    pubkey: PubKeyBytes,
+    pub id: AccountId,
+    pub nonce: u64,
+    pub pubkey: PublicKeyBytes,
+    trustanchor: bool,
 }
 
 impl Account {
-    // Make an Id based on the base58 of hash of the pubkey
-    pub fn create(pk: PublicKey) -> Self {
+    /// Create a new account given a public key
+    pub fn create(pk: &PublicKey, is_ta: bool) -> Self {
         Self {
-            id: generate_did(pk),
+            id: generate_account_id(pk),
             nonce: 0u64,
             pubkey: pk.as_bytes(),
+            trustanchor: is_ta,
         }
     }
 
-    pub fn inc_nonce(&self) -> Self {
+    pub fn id(&self) -> Vec<u8> {
+        self.id.clone()
+    }
+
+    /// Return the base58 account id
+    pub fn id_to_str(&self) -> anyhow::Result<String, anyhow::Error> {
+        let i = String::from_utf8(self.id.clone());
+        ensure!(i.is_ok(), "problem decoding account id to string");
+        Ok(i.unwrap())
+    }
+
+    /// Is the account a trust anchor?
+    pub fn is_trust_anchor(&self) -> bool {
+        self.trustanchor
+    }
+
+    pub fn update_pubkey(&self, pk: PublicKeyBytes) -> Self {
+        Self {
+            id: self.id.clone(),
+            nonce: self.nonce,
+            pubkey: pk,
+            trustanchor: self.trustanchor,
+        }
+    }
+
+    /// Increment the nonce for the account
+    pub fn increment_nonce(&self) -> Self {
         Self {
             id: self.id.clone(),
             nonce: self.nonce + 1,
             pubkey: self.pubkey,
+            trustanchor: self.trustanchor,
         }
-    }
-
-    pub fn id(&self) -> String {
-        self.id.clone()
-    }
-
-    pub fn nonce(&self) -> u64 {
-        self.nonce
-    }
-
-    pub fn pubkey(&self) -> Option<PublicKey> {
-        PublicKey::from_slice(&self.pubkey)
-    }
-
-    pub fn pubkey_as_hex(&self) -> String {
-        format!("0x{:}", hex::encode(self.pubkey))
     }
 }
 
 impl_store_values!(Account);
 
+/// Account Store
 pub(crate) struct AccountStore;
 impl Store for AccountStore {
-    type Key = String;
+    type Key = AccountId;
     type Value = Account;
 
     fn name(&self) -> String {
-        "rapido.account.store".into()
+        ACCOUNT_STORE_NAME.into()
     }
 }
 
 impl AccountStore {
     pub fn new() -> Self {
-        Self {}
-    }
-
-    pub fn save(&self, account: Account, view: &mut StoreView) {
-        self.put(account.id(), account, view)
-    }
-
-    pub fn get_account<I: Into<String>>(&self, id: I, view: &StoreView) -> Option<Account> {
-        self.get(id.into(), view)
-    }
-
-    pub fn has_account<I: Into<String>>(&self, id: I, view: &StoreView) -> bool {
-        self.get_account(id, view).is_some()
-    }
-
-    pub fn get_publickey<I: Into<String>>(&self, id: I, view: &StoreView) -> Option<String> {
-        self.get_account(id, view)
-            .and_then(|acct| Some(acct.pubkey_as_hex()))
-    }
-
-    pub fn get_nonce<I: Into<String>>(&self, id: I, view: &StoreView) -> Option<u64> {
-        self.get_account(id, view)
-            .and_then(|acct| Some(acct.nonce()))
+        AccountStore {}
     }
 }
 
-pub fn increment_nonce<I: Into<String>>(id: I, view: &mut StoreView) -> Result<(), anyhow::Error> {
-    let store = AccountStore::new();
-    match store.get_account(id, view) {
-        Some(acct) => {
-            store.save(acct.inc_nonce(), view);
-            Ok(())
+/// Message used in Transactions
+#[derive(BorshDeserialize, BorshSerialize, Debug, PartialEq, Clone)]
+pub enum Msgs {
+    Create(PublicKeyBytes),
+    ChangePubKey(PublicKeyBytes),
+}
+
+pub struct AccountModule {
+    // list of PublicKeys to create genesis accounts
+    genesis: Vec<[u8; 32]>,
+}
+
+impl AccountModule {
+    pub fn new(genesis: Vec<[u8; 32]>) -> Self {
+        Self { genesis }
+    }
+}
+
+impl AppModule for AccountModule {
+    fn name(&self) -> String {
+        ACCOUNT_APP_NAME.into()
+    }
+
+    fn initialize(&self, view: &mut StoreView) -> Result<(), anyhow::Error> {
+        // Process genesis data here.
+        let store = AccountStore::new();
+        for pk in &self.genesis {
+            let pubkey = PublicKey::from_slice(&pk[..]).expect("genesis: decode public key");
+            let account = Account::create(&pubkey, true);
+            store.put(account.id(), account, view)
         }
-        _ => bail!("Account not found"),
+        Ok(())
+    }
+
+    fn handle_tx(&self, ctx: &Context, view: &mut StoreView) -> Result<(), anyhow::Error> {
+        let msg: Msgs = ctx.decode_msg()?;
+        match msg {
+            Msgs::Create(pubkey) => {
+                let store = AccountStore::new();
+                // Ensure the caller's account exists and they are a trust anchor
+                let caller_acct = store.get(ctx.sender(), &view);
+                ensure!(caller_acct.is_some(), "user not found");
+                let acct = caller_acct.unwrap();
+
+                ensure!(
+                    acct.is_trust_anchor(),
+                    "only a trust anchor can create an account"
+                );
+
+                let pk = PublicKey::from_slice(&pubkey[..]);
+                ensure!(pk.is_some(), "problem decoding the public key");
+
+                let new_account = Account::create(&pk.unwrap(), false);
+                store.put(new_account.id(), new_account, view);
+                Ok(())
+            }
+            Msgs::ChangePubKey(pubkey) => {
+                let store = AccountStore::new();
+                let caller_acct = store.get(ctx.sender(), &view);
+                ensure!(caller_acct.is_some(), "user not found");
+                let acct = caller_acct.unwrap();
+
+                let updated = acct.update_pubkey(pubkey);
+                store.put(updated.id(), updated, view);
+                Ok(())
+            }
+        }
+    }
+
+    fn handle_query(
+        &self,
+        path: &str,
+        key: Vec<u8>,
+        view: &StoreView,
+    ) -> Result<Vec<u8>, anyhow::Error> {
+        ensure!(key.len() > 0, "bad account key");
+
+        match path {
+            "/" => {
+                let account = key;
+                let store = AccountStore::new();
+                let req_acct = store.get(account, &view);
+                ensure!(req_acct.is_some(), "account not found");
+
+                let acct: Account = req_acct.unwrap();
+                let bits = acct.try_to_vec()?;
+                Ok(bits)
+            }
+            _ => bail!("{:} not found", path),
+        }
     }
 }
-*/
+
+// Authenticator
+pub struct AccountAuthenticator;
+impl Authenticator for AccountAuthenticator {
+    fn validate(
+        &self,
+        tx: &SignedTransaction,
+        view: &StoreView,
+    ) -> anyhow::Result<(), anyhow::Error> {
+        let caller = tx.sender();
+        let txnonce = tx.nonce();
+        let store = AccountStore::new();
+
+        let caller_acct = store.get(caller, &view);
+        ensure!(caller_acct.is_some(), "user not found");
+        let acct = caller_acct.unwrap();
+
+        let caller_pubkey = PublicKey::from_slice(&acct.pubkey[..]);
+        ensure!(caller_pubkey.is_some(), "uproblem decoding");
+
+        // Validate signature
+        ensure!(
+            verify_tx_signature(&tx, &caller_pubkey.unwrap()),
+            "bad signature"
+        );
+
+        // Check nonce
+        ensure!(acct.nonce == txnonce, "nonce don't match");
+
+        Ok(())
+    }
+
+    fn increment_nonce(
+        &self,
+        tx: &SignedTransaction,
+        view: &mut StoreView,
+    ) -> anyhow::Result<(), anyhow::Error> {
+        let caller = tx.sender();
+        let store = AccountStore::new();
+        let caller_acct = store.get(caller.clone(), &view);
+        ensure!(caller_acct.is_some(), "user not found");
+
+        let acct = caller_acct.unwrap();
+        let unonce = acct.increment_nonce();
+        store.put(caller.clone(), unonce, view);
+
+        Ok(())
+    }
+}
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    use exonum_crypto::{gen_keypair, SecretKey};
+    use rapido_core::{testing_keypair, AppBuilder, TestKit};
+
+    fn create_account(name: &str) -> (Vec<u8>, PublicKeyBytes, SecretKey) {
+        let (pk, sk) = testing_keypair(name);
+        let acct = Account::create(&pk, true);
+        (acct.id(), acct.pubkey, sk)
+    }
+
+    fn get_genesis_accounts() -> Vec<[u8; 32]> {
+        vec![
+            create_account("bob").1,
+            create_account("alice").1,
+            create_account("tom").1,
+        ]
+    }
+
+    fn gen_tx(user: Vec<u8>, secret_key: &SecretKey, nonce: u64) -> SignedTransaction {
+        let mut tx = SignedTransaction::create(
+            user,
+            ACCOUNT_APP_NAME,
+            Msgs::Create([1u8; 32]), // fake data
+            nonce,
+        );
+        tx.sign(&secret_key);
+        tx
+    }
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_account_authenticator() {
+        let app = AppBuilder::new()
+            .set_authenticator(AccountAuthenticator {})
+            .with_app(AccountModule::new(get_genesis_accounts()));
+
+        let mut tester = TestKit::create(app);
+        tester.start();
+
+        let (bob, _bpk, bsk) = create_account("bob");
+
+        // Check signatures and correct nonce
+        let txs = &[
+            &gen_tx(bob.clone(), &bsk, 0u64),
+            &gen_tx(bob.clone(), &bsk, 1u64),
+            &gen_tx(bob.clone(), &bsk, 2u64),
+            &gen_tx(bob.clone(), &bsk, 3u64),
+        ];
+
+        assert!(tester.check_tx(txs).is_ok());
+
+        // Wrong nonce
+        assert!(tester
+            .check_tx(&[&gen_tx(bob.clone(), &bsk, 5u64)])
+            .is_err());
+
+        // Bad signature: bob's ID but signed with wrong key
+        let (_rpk, rsk) = gen_keypair();
+        assert!(tester
+            .check_tx(&[&gen_tx(bob.clone(), &rsk, 0u64)])
+            .is_err());
+    }
+
+    #[test]
+    fn test_ta_account_create() {
+        assert!(true)
+    }
+
+    #[test]
+    fn test_account_chng_pubkey() {
+        assert!(true)
     }
 }

@@ -11,51 +11,6 @@ use crate::store::StoreView;
 
 pub type AccountId = Vec<u8>;
 
-// Event manager used to capture events for tendermint
-// Accessed through the context - not used directly.
-// TODO: REMOVE??
-/*
-pub(crate) struct EventManager {
-    pub appname: String,
-    events: Vec<Event>,
-}
-
-impl EventManager {
-    // where appname is the Appmodule.name()
-    pub fn new(appname: String) -> Self {
-        Self {
-            appname: appname,
-            events: Vec::new(),
-        }
-    }
-
-    /// Example:
-    /// let pairs = &[("name", "bob"), ("employer", "Acme")];
-    /// eventmanager.emit_event(pairs);
-    // See Context dispatch_event
-    pub fn dispatch_event(&mut self, event_type: &str, pairs: &[(&str, &str)]) {
-        let mut rf = RepeatedField::<Pair>::new();
-        for (k, v) in pairs {
-            let mut p = Pair::new();
-            p.set_key(k.as_bytes().to_vec());
-            p.set_value(v.as_bytes().to_vec());
-            rf.push(p);
-        }
-
-        // Create a type with the appname: 'hello.transfer'
-        let full_event_type = format!("{}.{}", self.appname, event_type);
-        let mut e = Event::new();
-        e.set_field_type(full_event_type.into());
-        e.set_attributes(rf);
-        self.events.push(e);
-    }
-
-    pub fn get_events(&self) -> RepeatedField<Event> {
-        RepeatedField::from_vec(self.events.clone())
-    }
-}
-*/
-
 /// Context is passed to handlers from the framework automatically.
 /// It wraps information that can be used to process transactions
 /// such as the sender of the tx, the encoded msg to process and
@@ -80,6 +35,12 @@ impl Context {
             events: RefCell::new(Vec::new()),
             appname: tx.appname().into(),
         }
+    }
+
+    /// get the tx sender
+    pub fn sender(&self) -> AccountId {
+        /// Hmmm... this is ugly
+        self.sender.clone()
     }
 
     /// Helper to decode a specific application msg.
@@ -352,7 +313,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tx() {
+    fn test_signed_tx() {
         let accountid = vec![1];
         let (pk, sk) = exonum_crypto::gen_keypair();
         let mut tx =

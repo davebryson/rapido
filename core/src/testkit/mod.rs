@@ -2,6 +2,7 @@
 use crate::{AppBuilder, Node, SignedTransaction};
 use abci::*;
 use anyhow::{bail, ensure};
+use exonum_crypto::{hash, PublicKey, SecretKey, Seed};
 
 /// TestKit for testing an application without running Tendermint.
 pub struct TestKit {
@@ -87,5 +88,23 @@ impl TestKit {
         }
         // return the query value
         Ok(resp.value)
+    }
+}
+
+pub fn testing_keypair(val: &str) -> (PublicKey, SecretKey) {
+    let seed = Seed::new(hash(val.as_bytes()).as_bytes());
+    exonum_crypto::gen_keypair_from_seed(&seed)
+}
+
+mod tests {
+    use super::testing_keypair;
+
+    #[test]
+    fn test_kit_wallet() {
+        let (apk, ask) = testing_keypair("dave");
+        let (bpk, bsk) = testing_keypair("dave");
+
+        assert_eq!(apk, bpk);
+        assert_eq!(ask, bsk);
     }
 }

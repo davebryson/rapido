@@ -24,7 +24,7 @@ use protobuf::RepeatedField;
 // Re-export
 pub use self::{
     store::{Store, StoreView},
-    testkit::TestKit,
+    testkit::{testing_keypair, TestKit},
     types::{
         sign_transaction, verify_tx_signature, AccountId, AppModule, Authenticator, Context,
         SignedTransaction,
@@ -202,7 +202,7 @@ impl Node {
             // this doesn't affect the nonce count in deliver_tx
             ensure!(
                 self.authenticator.increment_nonce(&tx, &mut cache).is_ok(),
-                "check tx nonce error"
+                "check tx : inc nonce error"
             );
 
             // Refresh the cache
@@ -312,9 +312,15 @@ impl abci::Application for Node {
             }
         }
 
+        let fork = self.db.fork();
+        cache.commit(&fork);
+        //let aggregator = SystemSchema::new(&fork).state_aggregator();
+        //let statehash = aggregator.object_hash().as_bytes().to_vec();
+        //let resp = ResponseInitChain::new();
+        self.db.merge(fork.into_patch()).expect("init_chain:commit");
+
         // TODO: Put validators in state
-        // Add to the overall cache. This will be commited later
-        self.deliver_cache.replace(cache.into_cache());
+        self.deliver_cache.replace(Default::default());
         ResponseInitChain::new()
     }
 
