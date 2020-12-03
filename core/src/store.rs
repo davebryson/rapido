@@ -1,3 +1,4 @@
+//! Storage caches and trait(s)
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -7,7 +8,7 @@ use exonum_merkledb::{BinaryValue, Fork, Snapshot};
 
 use crate::schema;
 
-/// A change to the store
+/// Track changes in the cache. Assume payload is already encoded.
 #[derive(Debug)]
 pub enum ViewChange {
     Add(Vec<u8>),
@@ -24,7 +25,7 @@ impl ViewChange {
     }
 }
 
-/// Hashmap cache
+/// Hashmap cache used by check/deliver. Note keys are hashed.
 pub(crate) type Cache = HashMap<Hash, ViewChange>;
 
 /// StoreKey used to prefix each key based on the store.name()
@@ -50,7 +51,7 @@ where
     }
 }
 
-/// Provides cached access to a store
+/// Provides cached access to a store with a snapshot of the last committed data
 #[derive(Debug)]
 pub struct StoreView<'a> {
     cache: Cache,
@@ -58,8 +59,8 @@ pub struct StoreView<'a> {
 }
 
 impl<'a> StoreView<'a> {
-    /// Return a new view with cache
-    pub fn wrap(db: &'a Box<dyn Snapshot>, cache: Cache) -> Self {
+    /// Return a new view with the previous cache
+    pub(crate) fn wrap(db: &'a Box<dyn Snapshot>, cache: Cache) -> Self {
         StoreView {
             access: db,
             cache: cache,
@@ -67,7 +68,7 @@ impl<'a> StoreView<'a> {
     }
 
     /// Return a view when we only want the latest snapshot
-    pub fn wrap_snapshot(db: &'a Box<dyn Snapshot>) -> Self {
+    pub(crate) fn wrap_snapshot(db: &'a Box<dyn Snapshot>) -> Self {
         StoreView {
             access: db,
             cache: Default::default(),
@@ -75,7 +76,7 @@ impl<'a> StoreView<'a> {
     }
 
     /// Consume the cache
-    pub fn into_cache(self) -> Cache {
+    pub(crate) fn into_cache(self) -> Cache {
         self.cache
     }
 
@@ -83,6 +84,7 @@ impl<'a> StoreView<'a> {
         self.cache.contains_key(&key)
     }
 
+    /// Check the cache
     pub fn get(&self, key: &Hash) -> Option<&Vec<u8>> {
         if let Some(cv) = self.cache.get(&key) {
             return cv.get();
@@ -90,20 +92,24 @@ impl<'a> StoreView<'a> {
         None
     }
 
+    /// Skip the cache and check the last committed state
     pub fn get_from_store(&self, key: &Hash) -> Option<Vec<u8>> {
         schema::get_store(self.access).get(&key)
     }
 
+    /// Put a new view change into the cache
     pub fn put(&mut self, key: Hash, value: impl BinaryValue) {
         self.cache.insert(key, ViewChange::Add(value.to_bytes()));
     }
 
+    /// Remove an item
     pub fn remove(&mut self, key: Hash) {
         self.cache.insert(key, ViewChange::Remove);
     }
 
-    /// Called on abci.commit to write all changes to the merkle store
-    pub fn commit(&self, fork: &Fork) {
+    /// Called on abci.commit to write all changes to the merkle store.
+    /// Only called by the deliver_tx cache
+    pub(crate) fn commit(&self, fork: &Fork) {
         let mut store = schema::get_store(fork);
         for (k, cv) in &self.cache {
             match cv {
@@ -115,22 +121,23 @@ impl<'a> StoreView<'a> {
 }
 
 /// Implement this trait to create a store for your application.
-/// An application can have many different stores.
-/// Example:
-///
+/// This trait provides implementation for common operations such as
+/// put, get, etc...
+/// Primarily all you need to do is set the Key,Value type and return
+/// a name (via name()) that will be used as a prefix to the key.
 pub trait Store: Sync + Send {
     /// Specify the key used for this store.
-    /// A key can be any value that fulfills the Borsh se/de traits.
+    /// A key can be any type that is supported by Borsh.
     type Key: BorshSerialize + BorshDeserialize;
 
     /// Specify what will be stored.  The value must fulfill the
     /// BinaryValue trait.  Use the macro: `impl_store_values()` to do so.
     type Value: BinaryValue;
 
-    /// Return a unique name for the store.  Recommend using  'appname + name'.
+    /// Return a unique name for the store.  Recommend using  'appname.name'.
     /// For example, if the appname is 'example' and you define a store for 'People'
-    /// values, name should return: 'example.people'.  This value must be unique as
-    // it's used as a prefix to the key name in the MerkleTree.
+    /// values, `name()` should return: 'example.people'.  This value must be unique as
+    // it's used as a prefix to the key name in the Merkle Tree.
     fn name(&self) -> String;
 
     /// Put a value in the store

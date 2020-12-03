@@ -114,13 +114,9 @@ fn test_with_testkit() {
     assert!(tester.check_tx(&tx1).is_ok());
     assert!(tester.commit_tx(&tx1).is_ok());
 
-    let qr = tester
-        .query("person_app", "bob".as_bytes().to_vec())
-        .unwrap();
+    let qr = tester.query("person_app", "bob".into()).unwrap();
     let p = Person::try_from_slice(&qr[..]).unwrap();
     assert_eq!("bob", p.name);
 
-    assert!(tester
-        .query("person_app", "will_fail".as_bytes().to_vec())
-        .is_err());
+    assert!(tester.query("person_app", "will_fail".into()).is_err());
 }

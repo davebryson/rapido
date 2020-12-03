@@ -1,11 +1,9 @@
 //! TestKit is a simple tool to test your Application without running a Tendermint node.
-//! Example: (TODO)
-//!
 use crate::{AppBuilder, Node, SignedTransaction};
 use abci::*;
 use anyhow::{bail, ensure};
 
-/// TestKit for testing an applicatoin without Tendermint.
+/// TestKit for testing an application without running Tendermint.
 pub struct TestKit {
     node: Node,
     has_init: bool,

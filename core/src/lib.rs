@@ -1,14 +1,10 @@
-//! Rapido is a Rust framework for building Tendermint applications via ABCI.
+//! Rapido is a Rust framework for building Tendermint applications.
 //! It provides a high level API to assemble your application with:
-//! * Flexible storage options via [Exonum MerkleDb](https://docs.rs/exonum-merkledb)
+//! * Merkle Tree storage via [Exonum MerkleDb](https://docs.rs/exonum-merkledb)
 //! * Elliptic curve crypto via [Exonum Crypto](https://docs.rs/exonum-crypto/)
 //! * Deterministic message serialization via [Borsh](http://borsh.io/)
-//!
-//! This framework is inspired by exonum and other rust based blockchain projects.
-
 #[macro_use]
 mod macros;
-mod auth;
 mod schema;
 mod store;
 mod testkit;
@@ -40,6 +36,7 @@ const RESERVED_APP_NAME: &str = "rapido";
 const RAPIDO_HOME: &str = ".rapido";
 const RAPIDO_STATE_DIR: &str = "state";
 
+// Create a directory for rocksdb at ~/home/.rapido/state
 fn dbdir() -> PathBuf {
     let mut dir = dirs::home_dir().expect("find home dir");
     dir.push(RAPIDO_HOME);
@@ -47,7 +44,11 @@ fn dbdir() -> PathBuf {
     dir
 }
 
-/// Use the AppBuilder to assemble an application
+/// Assemble your app.
+/// Example:
+/// ```ignore
+///  AppBuilder::new().with_app(MyModule {}).run();
+/// ```
 pub struct AppBuilder {
     db: Arc<dyn Database>,
     appmodules: Vec<Box<dyn AppModule>>,
@@ -65,24 +66,28 @@ impl AppBuilder {
         }
     }
 
+    /// Add this call to the use rockdb to persist application state.
+    /// By default a temp in-memory db is used.
     pub fn use_production_db(mut self) -> Self {
         self.use_rocks_db = true;
         self
     }
 
-    /// Set the desired validation handler. If not set, checkTx will return 'ok' by default
+    /// Set an Authentication handler. See the `Authenticator` trait to implement
+    /// you own. If an authenticator is not set, the default is used with no tx authentication.
     pub fn set_authenticator(mut self, authenticator: impl Into<Box<dyn Authenticator>>) -> Self {
         self.validate_tx_handler = Some(authenticator.into());
         self
     }
 
+    /// Call this one or more times to add AppModules to the overall App.
     pub fn with_app(mut self, app: impl Into<Box<dyn AppModule>>) -> Self {
         self.appmodules.push(app.into());
         self
     }
 
-    /// Call to return a configured node with a Temp/in-memory db
-    /// Use to directly interact with ABCI calls during development
+    /// Call to return a configured node with a temp/in-memory db
+    /// Use to directly interact with ABCI calls during development.
     pub fn node(self) -> Node {
         if self.appmodules.len() == 0 {
             panic!("No appmodules configured!");
@@ -90,6 +95,8 @@ impl AppBuilder {
         Node::new(self)
     }
 
+    /// Called last to start the application via rust-abci.  This will start
+    /// the application and connect to Tendermint.
     pub fn run(mut self) {
         env_logger::Builder::from_env(Env::default().default_filter_or("info"))
             .try_init()
@@ -109,6 +116,16 @@ impl AppBuilder {
     }
 }
 
+/// Default authenticator used if one is not set in the AppBuilder.
+/// Returns Ok for any Tx. and does not increment a nonce.
+pub struct DefaultAuthenticator;
+impl Authenticator for DefaultAuthenticator {
+    fn validate(&self, _tx: &SignedTransaction, _view: &StoreView) -> Result<(), anyhow::Error> {
+        Ok(())
+    }
+}
+
+#[doc(hidden)]
 /// Node provides functionality to execute appmodules and manage storage.  
 /// You should use the `AppBuilder` to create a Node.
 pub struct Node {
@@ -124,6 +141,7 @@ impl Node {
     pub fn new(config: AppBuilder) -> Self {
         let db = config.db;
 
+        // setup route mapping
         let mut service_map = HashMap::new();
         for s in config.appmodules {
             let route = s.name();
@@ -140,7 +158,7 @@ impl Node {
         // Use the default authenticator if one is not set.
         let auth = match config.validate_tx_handler {
             Some(a) => a,
-            None => Box::new(auth::DefaultAuthenticator),
+            None => Box::new(DefaultAuthenticator),
         };
 
         Self {
@@ -164,12 +182,12 @@ impl Node {
         // Return err if there are no appmodules matching the route
         if !self.appmodules.contains_key(tx.appname()) {
             bail!(format!(
-                "No registered Module found for name: {}",
+                "No registered AppModule found for name: {}",
                 tx.appname()
             ));
         }
 
-        // If this is a check_tx and a validation handler has been set, run it
+        // If this is a check_tx handle it
         if is_check {
             let snap = self.db.snapshot();
             let mut cache = store::StoreView::wrap(&snap, self.check_cache.take().unwrap());
@@ -180,16 +198,22 @@ impl Node {
             };
 
             // Increment the nonce for a sender in the checkTx cache
+            // this is to ensure multiple txs from a user are tracked
+            // this doesn't affect the nonce count in deliver_tx
             ensure!(
                 self.authenticator.increment_nonce(&tx, &mut cache).is_ok(),
                 "check tx nonce error"
             );
 
+            // Refresh the cache
             self.check_cache.replace(cache.into_cache());
+            // We're done here...
             return resp;
         }
 
-        // Run DeliverTx by:
+        // Run DeliverTx
+
+        // Expect shouldn't ever happen. We checked above
         let app = self.appmodules.get(tx.appname()).expect("app module");
         let snap = self.db.snapshot();
         let mut cache = store::StoreView::wrap(&snap, self.deliver_cache.take().unwrap());
@@ -213,15 +237,20 @@ impl Node {
         resp
     }
 
-    // Called by abci.commit
+    // Called by abci.commit() below
     fn update_state(&mut self, fork: &Fork) -> Vec<u8> {
+        // Use the root aggregator from Exonum.
+        // Probably don't really need this as we're using 1
+        // tree for all...
         let aggregator = SystemSchema::new(fork).state_aggregator();
         let statehash = aggregator.object_hash().as_bytes().to_vec();
 
+        // Update the Rapido chain state
         let mut rapidostate = RapidoSchema::new(fork);
         let laststate = rapidostate.get_chain_state().unwrap_or_default();
         let new_height = laststate.height + 1;
         rapidostate.save_chain_state(new_height, statehash.clone());
+        // Return the new apphash
         statehash.clone()
     }
 }
@@ -230,17 +259,22 @@ impl Node {
 // form: 'appname/somepath', where 'appname' is the name of the AppModule
 // and '/somepath' is your application's specific path. If you
 // want to just query on any key, use the form: 'appname/' or 'appname'.
+// Returns (appname, path remainder)
 fn parse_abci_query_path(req_path: &str) -> Option<(&str, &str)> {
+    // Need a path...
     if req_path.len() == 0 {
         return None;
     }
+    // Need an appname
     if req_path == "/" {
         return None;
     }
+    // Add a '/' if one not provided for consistency
     if !req_path.contains("/") {
         return Some((req_path, "/"));
     }
 
+    // Find the first '/' and parse from there...
     req_path
         .find("/")
         .filter(|i| i > &0usize)
@@ -250,7 +284,7 @@ fn parse_abci_query_path(req_path: &str) -> Option<(&str, &str)> {
 // Implements the abci::application trait
 #[doc(hidden)]
 impl abci::Application for Node {
-    // Check we're in sync, replay if not...
+    // Check we're in sync, replay if not... called on startup
     fn info(&mut self, req: &RequestInfo) -> ResponseInfo {
         let snapshot = self.db.snapshot();
         let store = RapidoSchema::new(&snapshot);
@@ -264,8 +298,8 @@ impl abci::Application for Node {
         resp
     }
 
-    // Ran once on the initial start of the application.
-    // AppModules can implement `initialize` to load initial state.
+    // Ran once on the initial (genesis) of the application.
+    // AppModules can implement `initialize` to load their own initial state.
     fn init_chain(&mut self, _req: &RequestInitChain) -> ResponseInitChain {
         let snap = self.db.snapshot();
         let mut cache = store::StoreView::wrap(&snap, self.deliver_cache.take().unwrap());
@@ -279,10 +313,12 @@ impl abci::Application for Node {
         }
 
         // TODO: Put validators in state
+        // Add to the overall cache. This will be commited later
         self.deliver_cache.replace(cache.into_cache());
         ResponseInitChain::new()
     }
 
+    // handle rpc queries
     fn query(&mut self, req: &RequestQuery) -> ResponseQuery {
         let mut response = ResponseQuery::new();
         let key = req.data.clone();
@@ -301,7 +337,7 @@ impl abci::Application for Node {
         let snapshot = self.db.snapshot();
         let cache = store::StoreView::wrap_snapshot(&snapshot);
 
-        // TODO: Add rapdio queries:
+        // TODO: Add rapdio reserved queries:
         // /rapido/apphash
         // /rapido/validators
 
@@ -312,7 +348,8 @@ impl abci::Application for Node {
             return response;
         }
 
-        // Call handle_query
+        // Call AppModule handle_query
+        // We return 0 if all is bueno, else 1
         match self
             .appmodules
             .get(appname)
@@ -335,6 +372,7 @@ impl abci::Application for Node {
         }
     }
 
+    // Who gets in the Tendermint mempool...?
     fn check_tx(&mut self, req: &RequestCheckTx) -> ResponseCheckTx {
         let mut resp = ResponseCheckTx::new();
         match self.run_tx(true, req.tx.clone()) {
@@ -350,6 +388,7 @@ impl abci::Application for Node {
         }
     }
 
+    // Well you made is this far, let's see if you can influence app state.
     fn deliver_tx(&mut self, req: &RequestDeliverTx) -> ResponseDeliverTx {
         let mut resp = ResponseDeliverTx::new();
         match self.run_tx(false, req.tx.clone()) {
@@ -375,6 +414,7 @@ impl abci::Application for Node {
         ResponseEndBlock::new()
     }
 
+    // Commit the txs and update app state
     fn commit(&mut self, _req: &RequestCommit) -> ResponseCommit {
         let snap = self.db.snapshot();
         let cache = store::StoreView::wrap(&snap, self.deliver_cache.take().unwrap());
@@ -382,11 +422,13 @@ impl abci::Application for Node {
         let fork = self.db.fork();
         cache.commit(&fork);
 
+        // new state root hash!
         let apphash = self.update_state(&fork);
         self.db
             .merge(fork.into_patch())
             .expect("abci:commit appstate");
 
+        // Refresh the caches
         self.deliver_cache.replace(Default::default());
         self.check_cache.replace(Default::default());
 

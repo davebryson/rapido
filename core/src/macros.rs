@@ -1,6 +1,7 @@
 /// Use for values that will be stored in the merkle db.
-/// Implements BinaryValue and ObjectHash
-/// Note: the given type must derive BorshSerialize/Deserialize
+/// Implements BinaryValue and ObjectHash for the type.
+/// Note: The type to this macro must derive BorshSerialize/Deserialize.
+/// This is an adaptation of the macro from Exonum.
 #[macro_export]
 macro_rules! impl_store_values {
     ($( $type:ty ),*) => {
