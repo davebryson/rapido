@@ -149,10 +149,66 @@ impl AppModule for CounterHandler {
     }
 }
 
+// Example of how to test your application
+
 #[cfg(test)]
 mod tests {
+    use crate::{Counter, CounterHandler, Msgs, APP_NAME};
+    use borsh::BorshDeserialize;
+    use rapido_core::{AppBuilder, SignedTransaction, TestKit};
+
     #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+    fn test_counter_app() {
+        // accounts
+        let bob: Vec<u8> = "bob".into();
+        let alice: Vec<u8> = "alice".into();
+
+        // Configure the app
+        let app = AppBuilder::new().with_app(CounterHandler {});
+
+        // Setup the tester
+        let mut tester = TestKit::create(app);
+        tester.start();
+
+        {
+            // Create txs
+            let txs = &[
+                &SignedTransaction::create(bob.clone(), APP_NAME, Msgs::Create, 0u64),
+                &SignedTransaction::create(alice.clone(), APP_NAME, Msgs::Create, 0u64),
+            ];
+
+            // We call commit to save to state (deliver_tx)
+            assert!(tester.commit_tx(txs).is_ok());
+        }
+
+        {
+            // Add 5 to bob's count
+            let txs = &[&SignedTransaction::create(
+                bob.clone(),
+                APP_NAME,
+                Msgs::Add(5u16),
+                0u64,
+            )];
+            assert!(tester.commit_tx(txs).is_ok());
+        }
+
+        {
+            // Try to subtract a value from Alice.  Should fail as we don't allow
+            // subtracting from 0.
+            let txs = &[&SignedTransaction::create(
+                alice.clone(),
+                APP_NAME,
+                Msgs::Subtract(5u16),
+                0u64,
+            )];
+            assert!(tester.commit_tx(txs).is_err());
+        }
+
+        {
+            // Query Bob's count - should be 5
+            let v = tester.query(APP_NAME, bob.clone()).unwrap();
+            let count = Counter::try_from_slice(&v).unwrap();
+            assert_eq!(count.0, 5u16);
+        }
     }
 }
