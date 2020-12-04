@@ -1,5 +1,5 @@
 //!
-//! Basic accounts with an authenticator.
+//! Basic account support with an authenticator.
 //!
 use anyhow::{bail, ensure};
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -12,7 +12,7 @@ use rapido_core::{
 #[macro_use]
 extern crate rapido_core;
 
-const ACCOUNT_APP_NAME: &str = "rapidoaccount";
+const ACCOUNT_APP_NAME: &str = "rapido.account";
 const ACCOUNT_STORE_NAME: &str = "rapido.account.store";
 
 pub type PublicKeyBytes = [u8; PUBLIC_KEY_LENGTH];
@@ -126,7 +126,7 @@ impl AppModule for AccountModule {
         let store = AccountStore::new();
         for pk in &self.genesis {
             let pubkey = PublicKey::from_slice(&pk[..]).expect("genesis: decode public key");
-            let account = Account::create(&pubkey, true);
+            let account = Account::create(&pubkey, true); // <= make them a trust anchor
             store.put(account.id(), account, view)
         }
         Ok(())
@@ -208,7 +208,10 @@ impl Authenticator for AccountAuthenticator {
         let acct = caller_acct.unwrap();
 
         let caller_pubkey = PublicKey::from_slice(&acct.pubkey[..]);
-        ensure!(caller_pubkey.is_some(), "uproblem decoding");
+        ensure!(
+            caller_pubkey.is_some(),
+            "problem decoding the user's public key"
+        );
 
         // Validate signature
         ensure!(
@@ -273,6 +276,7 @@ mod tests {
 
     #[test]
     fn test_account_authenticator() {
+        // Check signature verification and nonce rules are enforced
         let app = AppBuilder::new()
             .set_authenticator(AccountAuthenticator {})
             .with_app(AccountModule::new(get_genesis_accounts()));
@@ -306,11 +310,42 @@ mod tests {
 
     #[test]
     fn test_ta_account_create() {
-        assert!(true)
+        // Bob will create an account for Carol
+        // Carol will try to create an account for Andy...but it'll fail
+        let app = AppBuilder::new()
+            .set_authenticator(AccountAuthenticator {})
+            .with_app(AccountModule::new(get_genesis_accounts()));
+
+        let mut tester = TestKit::create(app);
+        tester.start();
+
+        let (bob, _bpk, bsk) = create_account("bob");
+        let (carol, cpk, csk) = create_account("carol");
+        let (_andy, apk, _) = create_account("andy");
+
+        let mut tx =
+            SignedTransaction::create(bob.clone(), ACCOUNT_APP_NAME, Msgs::Create(cpk), 0u64);
+        tx.sign(&bsk);
+
+        assert!(tester.check_tx(&[&tx]).is_ok());
+        assert!(tester.commit_tx(&[&tx]).is_ok());
+
+        assert!(tester.query("rapido.account", carol.clone()).is_ok());
+
+        let mut tx1 =
+            SignedTransaction::create(carol.clone(), ACCOUNT_APP_NAME, Msgs::Create(apk), 0u64);
+        tx1.sign(&csk);
+
+        // Check passes...but
+        assert!(tester.check_tx(&[&tx1]).is_ok());
+        // deliver fails...carol is not a TA
+        assert!(tester.commit_tx(&[&tx1]).is_err());
     }
 
     #[test]
     fn test_account_chng_pubkey() {
+        // Bob will change is pubkey.  Make sure he can authenticate with it
+
         assert!(true)
     }
 }
