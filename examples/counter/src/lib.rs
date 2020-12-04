@@ -1,10 +1,10 @@
-//! Counter application that's simple and demonstrates Rapido functionality.
-//! User's can maintain a counter in a state store.
-//! A user account (tx.sender) is just a 'name'.  So:
-//! name => Counter{}
-//! User's can increase and decrease their Counters and check the current count.
-//! For demo purposes, Txs don't need to be signed.
-
+//! Simple 'counter' example
+//!
+//!
+//! A user can maintain their own personal counter in the state store. This example uses the default
+//! (testing) authenticator that allows all transactions (don't need to signed).  User's can increase
+//! and decrease their Counters and check the current count.
+//!
 use borsh::{BorshDeserialize, BorshSerialize};
 use rapido_core::{AccountId, AppModule, Context, Store, StoreView};
 
@@ -14,80 +14,100 @@ extern crate rapido_core;
 #[macro_use]
 extern crate log;
 
+/// Unique name for the application.  This will be registered in the overall application.
+/// Use this value to set the 'app' value in a transaction
 pub const APP_NAME: &'static str = "example.counter.app";
 
-/// Model for the counter.  This is stored in the Merkle Tree
+/// Implement what you want to store (model).  Each user has a Count in the Merkle Tree.  
+/// We simple store the count as a u16.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Default)]
-pub struct Counter {
-    count: u16,
-}
-
+pub struct Counter(pub u16);
 impl Counter {
+    // Add a value to the current count
     pub fn add(&self, value: u16) -> Self {
-        Self {
-            count: self.count + value,
-        }
+        Self(self.0 + value)
     }
 
-    pub fn subtract(&self, value: u16) -> Self {
-        Self {
-            count: self.count - value,
+    // Substract a value to the current count
+    pub fn subtract(&self, value: u16) -> anyhow::Result<Self, anyhow::Error> {
+        if value > self.0 {
+            bail!("I don't do negative results")
         }
-    }
-
-    pub fn to_hex(&self) -> String {
-        format!("{:x}", self.count)
+        Ok(Self(self.0 - value))
     }
 }
 
-// Call to make it storable in the Tree
+// Make `Counter` something that can be stored.  This macro implements the traits required
+// by the underlying storage model
 impl_store_values!(Counter);
 
-/// Store for counters
+/// Implement the Store for this application.  The `Store trait` already implements the
+/// common store operations such as: `put`, `get`, etc....   
 pub struct CounterStore;
 impl Store for CounterStore {
-    // The key for the store.  Counter name
+    /// Set the Key type used by this store.  
     type Key = AccountId;
-    // The actual value stored
+    /// Set the Value type used by this store.  
     type Value = Counter;
 
-    // TODO: Change this to &'static str
+    /// Return the unique name of this store. This value is used internally to prefix all keys.
+    /// Keys are prefixed with the `name()` result and then hashed before they're actually stored.
     fn name(&self) -> String {
         "counter.store".into()
     }
 }
 
+/// Implement the messages the drive state changes in your AppModule.  `Msgs` are included in
+/// the transaction.
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
 pub enum Msgs {
-    Create(String),
+    Create,
     Add(u16),
     Subtract(u16),
 }
 
+/// This the core logic for your application.
 pub struct CounterHandler;
 impl AppModule for CounterHandler {
+    /// The unique name of the application
     fn name(&self) -> String {
         APP_NAME.into()
     }
 
+    /// Implement this to load any unique data to this application.  This is genesis
+    /// data and only loaded once, on the first start.
     fn initialize(&self, _view: &mut StoreView) -> Result<(), anyhow::Error> {
         debug!("counter run init");
         Ok(())
     }
 
+    /// Called to handle incoming transaction to this application
     fn handle_tx(&self, ctx: &Context, view: &mut StoreView) -> Result<(), anyhow::Error> {
+        // Decode the message the was delivered in the transaction
         let msg: Msgs = ctx.decode_msg()?;
+        // Get our store
         let store = CounterStore {};
         debug!("counter: handle tx!");
 
+        // Operate on the message based on type
         match msg {
-            Msgs::Create(name) => {
-                let n = name.as_bytes().to_vec();
-                ensure!(store.get(n.clone(), view).is_none(), "User already exists");
-                store.put(n, Counter::default(), view);
+            // Create a new Counter for the sender, as long as they don't have one already
+            Msgs::Create => {
+                // Ctx contains the sender
+                let user = ctx.sender.clone();
+
+                // Check the store. Errs if user exists
+                ensure!(
+                    store.get(user.clone(), view).is_none(),
+                    "User already exists"
+                );
+
+                // Store the new user/counter
+                store.put(user, Counter::default(), view);
                 Ok(())
             }
             Msgs::Add(val) => {
+                // Call Add on the user's Counter
                 if let Some(cnt) = store.get(ctx.sender.clone(), view) {
                     store.put(ctx.sender.clone(), cnt.add(val), view);
                     return Ok(());
@@ -95,11 +115,10 @@ impl AppModule for CounterHandler {
                 bail!("user not found")
             }
             Msgs::Subtract(val) => {
+                // Call Subtract on the user's counter
                 if let Some(cnt) = store.get(ctx.sender.clone(), view) {
-                    if val > cnt.count {
-                        bail!("can't have negative results from a subtract")
-                    }
-                    store.put(ctx.sender.clone(), cnt.subtract(val), view);
+                    let new_count = cnt.subtract(val)?;
+                    store.put(ctx.sender.clone(), new_count, view);
                     return Ok(());
                 }
                 bail!("user not found")
@@ -107,6 +126,7 @@ impl AppModule for CounterHandler {
         }
     }
 
+    /// Handle RPC queries to the application. You define the relative paths to the App.
     fn handle_query(
         &self,
         path: &str,
@@ -114,14 +134,18 @@ impl AppModule for CounterHandler {
         view: &StoreView,
     ) -> Result<Vec<u8>, anyhow::Error> {
         let account = key;
-        let store = CounterStore {};
-        match path {
-            "/" => match store.get(account.clone(), view) {
-                Some(c) => Ok(c.try_to_vec().unwrap()),
+
+        // This is the only path for this example.  This would respond to the RPC call:
+        // http://127.0.0.1:26657/example.counter.app/
+        //
+        if path == "/" {
+            let store = CounterStore {};
+            return match store.get(account.clone(), view) {
+                Some(c) => Ok(c.try_to_vec().unwrap()), // Convert the counter to a Vec for transport
                 None => bail!("not count found for the given user"),
-            },
-            _ => bail!("nothing else to see here..."),
+            };
         }
+        bail!("nothing else to see here...")
     }
 }
 
