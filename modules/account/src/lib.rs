@@ -1,5 +1,6 @@
 //!
-//! Basic account support with an authenticator.
+//! Basic account support with an authenticator. Primarly used for development/testing.
+//! Uses a 'Trust Anchor' approach to bootstrapping users: Genesis accounts create other accounts.
 //!
 use anyhow::{bail, ensure};
 use borsh::{BorshDeserialize, BorshSerialize};

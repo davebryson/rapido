@@ -97,7 +97,7 @@ pub fn testing_keypair(val: &str) -> (PublicKey, SecretKey) {
 }
 
 mod tests {
-    use super::testing_keypair;
+    use crate::testing_keypair;
 
     #[test]
     fn test_kit_wallet() {

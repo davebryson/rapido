@@ -43,7 +43,7 @@ impl_store_values!(Counter);
 
 /// Implement the Store for this application.  The `Store trait` already implements the
 /// common store operations such as: `put`, `get`, etc....   
-pub struct CounterStore;
+pub(crate) struct CounterStore;
 impl Store for CounterStore {
     /// Set the Key type used by this store.  
     type Key = AccountId;
