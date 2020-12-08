@@ -1,8 +1,7 @@
 # Rapido
 
-A Rust framework for building Tendermint applications.  See `tests`.
+A Rust framework for building Tendermint applications.  See `core`.
 
-Tendermint: 0.33.6
+Current supported version of Tendermint: 0.33.6
 
-*This is a work in-progress*
 
