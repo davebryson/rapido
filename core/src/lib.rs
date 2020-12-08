@@ -14,6 +14,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+#[macro_use]
+extern crate log;
+
 use crate::schema::RapidoSchema;
 use abci::*;
 use anyhow::{bail, ensure};
@@ -112,6 +115,8 @@ impl AppBuilder {
         }
 
         let node = Node::new(self);
+        info!(" ~~ starting application ~~");
+        info!(" ... waiting for connection from Tendermint ...");
         abci::run_local(node);
     }
 }

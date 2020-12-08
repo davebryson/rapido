@@ -91,18 +91,19 @@ impl TestKit {
     }
 }
 
+/// Helper to generate consistent keypairs for a given user-friendly value.
+/// Not to be used for other than testing.
+/// Example: `let (pk, sk) = testing_keypair("bob")`
 pub fn testing_keypair(val: &str) -> (PublicKey, SecretKey) {
     let seed = Seed::new(hash(val.as_bytes()).as_bytes());
     exonum_crypto::gen_keypair_from_seed(&seed)
 }
 
 mod tests {
-    use crate::testing_keypair;
-
     #[test]
     fn test_kit_wallet() {
-        let (apk, ask) = testing_keypair("dave");
-        let (bpk, bsk) = testing_keypair("dave");
+        let (apk, ask) = crate::testing_keypair("dave");
+        let (bpk, bsk) = crate::testing_keypair("dave");
 
         assert_eq!(apk, bpk);
         assert_eq!(ask, bsk);
