@@ -121,8 +121,7 @@ impl<'a> StoreView<'a> {
 }
 
 /// Implement this trait to create a store for your application.
-/// This trait provides implementation for common operations such as
-/// put, get, etc...
+/// Common operations such as put, get, etc... are provided.
 /// Primarily all you need to do is set the Key,Value type and return
 /// a name (via name()) that will be used as a prefix to the key.
 pub trait Store: Sync + Send {

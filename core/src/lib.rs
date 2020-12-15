@@ -1,8 +1,10 @@
 //! Rapido is a Rust framework for building Tendermint applications.
-//! It provides a high level API to assemble your application with:
+//! It provides all you need to assemble an application with:
 //! * Merkle Tree storage via [Exonum MerkleDb](https://docs.rs/exonum-merkledb)
 //! * Elliptic curve crypto via [Exonum Crypto](https://docs.rs/exonum-crypto/)
 //! * Deterministic message serialization via [Borsh](http://borsh.io/)
+//!
+//! See [Counter](https://github.com/davebryson/rapido/blob/master/examples/counter/src/lib.rs) for a complete example application
 #[macro_use]
 mod macros;
 mod schema;

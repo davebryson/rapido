@@ -96,9 +96,10 @@ impl Context {
     }
 }
 
-/// Implement to create an authenticator for the app.  See `AppBuilder`.
-/// A default Authenticator is used if one is not set by your application.
-/// The default authenticator does not check txs or increment the nonce.
+/// Implement to create an authenticator for the app.
+/// A default authenticator is set by `AppBuilder` if one is not set by your application.
+/// Note: the default authenticator allows all transactions and doesn't increment a nonce - used
+/// primarily for testing.
 pub trait Authenticator: Sync + Send + 'static {
     /// Validate an incoming transaction to determine whether is should be included
     /// in the Tendermint tx mempool. Validation checks should be limited to
@@ -111,8 +112,8 @@ pub trait Authenticator: Sync + Send + 'static {
     ) -> anyhow::Result<(), anyhow::Error>;
 
     /// Provide the logic to increment a nonce. This is usually needed for
-    /// account based accounts to ensure the proper order of transactions.
-    /// For example, if the same user sends multiple txs within the same block.
+    /// account based accounts to ensure the proper order of transactions,
+    /// e.g. if the same user sends multiple txs within the same block.
     /// This is called automatically in both check_tx, and deliver_tx.
     fn increment_nonce(
         &self,

@@ -6,6 +6,7 @@ edition = "2018"
 license = "Apache-2.0"
 keywords = ["tendermint", "blockchain", "abci"]
 description = "A Rust framework for building Tendermint applications"
+repository = "https://github.com/davebryson/rapido/tree/master/core"
 
 [dependencies]
 abci = {git = "https://github.com/tendermint/rust-abci", branch="develop"}
