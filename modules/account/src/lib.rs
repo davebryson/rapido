@@ -1,6 +1,6 @@
 //!
 //! Basic account support with an authenticator. Primarly used for development/testing.
-//! Uses a 'Trust Anchor' approach to bootstrapping users: Genesis accounts create other accounts.
+//! Uses a 'Trust Anchor' approach to bootstrapping users: Genesis accounts can create other accounts.
 //!
 use anyhow::{bail, ensure};
 use borsh::{BorshDeserialize, BorshSerialize};
@@ -18,7 +18,7 @@ const ACCOUNT_STORE_NAME: &str = "rapido.account.store";
 
 pub type PublicKeyBytes = [u8; PUBLIC_KEY_LENGTH];
 
-// base58(hash(pubkey))
+// Format of the account id: base58(hash(pubkey))
 fn generate_account_id(pk: &PublicKey) -> Vec<u8> {
     let hash = hash(&pk.as_bytes());
     bs58::encode(&hash.as_bytes()).into_vec()
@@ -30,6 +30,7 @@ pub struct Account {
     pub id: AccountId,
     pub nonce: u64,
     pub pubkey: PublicKeyBytes,
+    // flag: can this entity create accounts
     trustanchor: bool,
 }
 
@@ -107,7 +108,7 @@ pub enum Msgs {
 }
 
 pub struct AccountModule {
-    // list of PublicKeys to create genesis accounts
+    // PublicKeys of genesis accounts
     genesis: Vec<[u8; 32]>,
 }
 
@@ -122,8 +123,8 @@ impl AppModule for AccountModule {
         ACCOUNT_APP_NAME.into()
     }
 
+    // Load genesis accounts.  These entries become the trust anchors
     fn initialize(&self, view: &mut StoreView) -> Result<(), anyhow::Error> {
-        // Process genesis data here.
         let store = AccountStore::new();
         for pk in &self.genesis {
             let pubkey = PublicKey::from_slice(&pk[..]).expect("genesis: decode public key");
@@ -136,6 +137,7 @@ impl AppModule for AccountModule {
     fn handle_tx(&self, ctx: &Context, view: &mut StoreView) -> Result<(), anyhow::Error> {
         let msg: Msgs = ctx.decode_msg()?;
         match msg {
+            // Create an account.  The origin of this call, must be a trust anchor
             Msgs::Create(pubkey) => {
                 let store = AccountStore::new();
                 // Ensure the caller's account exists and they are a trust anchor
@@ -151,10 +153,14 @@ impl AppModule for AccountModule {
                 let pk = PublicKey::from_slice(&pubkey[..]);
                 ensure!(pk.is_some(), "problem decoding the public key");
 
+                // Create the new account
                 let new_account = Account::create(&pk.unwrap(), false);
                 store.put(new_account.id(), new_account, view);
                 Ok(())
             }
+
+            // Change an existing publickey.  The origin of this call is the owner
+            // of the publickey
             Msgs::ChangePubKey(pubkey) => {
                 let store = AccountStore::new();
                 let caller_acct = store.get(ctx.sender(), &view);
@@ -176,6 +182,7 @@ impl AppModule for AccountModule {
     ) -> Result<Vec<u8>, anyhow::Error> {
         ensure!(key.len() > 0, "bad account key");
 
+        // return a serialized account for the given id.
         match path {
             "/" => {
                 let account = key;
